@@ -5,7 +5,7 @@ import { createMenu } from './menu';
 
 let mainWindow: BrowserWindow | null = null;
 
-const isDev = process.env.NODE_ENV !== 'production' || !app.isPackaged;
+const isDev = !app.isPackaged;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
