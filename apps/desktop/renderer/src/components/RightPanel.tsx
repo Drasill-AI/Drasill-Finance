@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { FileContext } from '@drasill/shared';
 import styles from './RightPanel.module.css';
+import lonnieIcon from '../assets/lonnie.png';
 
 export function RightPanel() {
   const [input, setInput] = useState('');
@@ -150,7 +151,7 @@ export function RightPanel() {
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
-        <span className={styles.title}>ASSISTANT</span>
+        <span className={styles.title}>TROUBLESHOOTING LONNIE</span>
         <div className={styles.headerActions}>
           {ragChunksCount > 0 && (
             <span className={styles.ragBadge} title={`${ragChunksCount} chunks indexed`}>
@@ -194,8 +195,8 @@ export function RightPanel() {
       <div className={styles.content}>
         {chatMessages.length === 0 ? (
           <div className={styles.placeholder}>
-            <span className={styles.icon}>🤖</span>
-            <h3>AI Assistant</h3>
+            <img src={lonnieIcon} alt="Lonnie" className={styles.lonnieIcon} />
+            <h3>Troubleshooting Lonnie</h3>
             <p>Ask questions about your documents</p>
             {!hasApiKey && (
               <button 
@@ -233,7 +234,7 @@ export function RightPanel() {
                 className={`${styles.message} ${styles[msg.role]}`}
               >
                 <div className={styles.messageHeader}>
-                  {msg.role === 'user' ? '👤 You' : '🤖 Assistant'}
+                  {msg.role === 'user' ? '👤 You' : <><img src={lonnieIcon} alt="Lonnie" className={styles.lonnieAvatar} /> Lonnie</>}
                 </div>
                 <div className={styles.messageContent}>
                   {msg.content || (isChatLoading && msg.role === 'assistant' ? (

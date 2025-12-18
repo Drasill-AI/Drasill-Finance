@@ -1,11 +1,24 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { IPC_CHANNELS, DirEntry, FileStat, FileReadResult, shouldIgnore, getExtension, BINARY_EXTENSIONS, ChatRequest } from '@drasill/shared';
+import Store from 'electron-store';
+import { IPC_CHANNELS, DirEntry, FileStat, FileReadResult, shouldIgnore, getExtension, BINARY_EXTENSIONS, ChatRequest, PersistedState } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
 import { indexWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI } from './rag';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for reading files
+
+// State persistence store
+const stateStore = new Store<{ appState: PersistedState }>({
+  name: 'app-state',
+  defaults: {
+    appState: {
+      workspacePath: null,
+      openTabs: [],
+      activeTabId: null,
+    }
+  }
+});
 
 export function setupIpcHandlers(): void {
   // Select workspace folder
@@ -163,5 +176,15 @@ export function setupIpcHandlers(): void {
   // RAG: Clear
   ipcMain.handle(IPC_CHANNELS.RAG_CLEAR, async (): Promise<void> => {
     clearVectorStore();
+  });
+
+  // State: Save persisted state
+  ipcMain.handle(IPC_CHANNELS.STATE_SAVE, async (_event, state: PersistedState): Promise<void> => {
+    stateStore.set('appState', state);
+  });
+
+  // State: Load persisted state
+  ipcMain.handle(IPC_CHANNELS.STATE_LOAD, async (): Promise<PersistedState> => {
+    return stateStore.get('appState');
   });
 }

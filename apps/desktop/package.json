@@ -45,6 +45,7 @@
   "build": {
     "appId": "com.drasill.cloud",
     "productName": "Drasill Cloud",
+    "icon": "assets/icon.ico",
     "directories": {
       "output": "release"
     },
@@ -59,6 +60,12 @@
         "to": "assets"
       }
     ],
+    "nsis": {
+      "oneClick": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    },
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"

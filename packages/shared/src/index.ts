@@ -73,6 +73,22 @@ export interface FileReadResult {
 }
 
 /**
+ * Persisted app state
+ */
+export interface PersistedState {
+  workspacePath: string | null;
+  openTabs: Array<{
+    id: string;
+    name: string;
+    path: string;
+    type: 'text' | 'markdown' | 'pdf' | 'word' | 'unknown';
+  }>;
+  activeTabId: string | null;
+  sidebarWidth?: number;
+  rightPanelWidth?: number;
+}
+
+/**
  * IPC channel names
  */
 export const IPC_CHANNELS = {
@@ -95,6 +111,9 @@ export const IPC_CHANNELS = {
   RAG_SEARCH: 'rag-search',
   RAG_GET_STATUS: 'rag-get-status',
   RAG_CLEAR: 'rag-clear',
+  // State persistence
+  STATE_SAVE: 'state-save',
+  STATE_LOAD: 'state-load',
 } as const;
 
 /**

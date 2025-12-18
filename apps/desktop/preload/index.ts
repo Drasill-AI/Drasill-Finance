@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import { IPC_CHANNELS, DirEntry, FileStat, FileReadResult, ChatRequest, ChatStreamChunk } from '@drasill/shared';
+import { IPC_CHANNELS, DirEntry, FileStat, FileReadResult, ChatRequest, ChatStreamChunk, PersistedState } from '@drasill/shared';
 
 /**
  * API exposed to the renderer process via contextBridge
@@ -148,6 +148,21 @@ const api = {
    */
   clearRagIndex: (): Promise<void> => {
     return ipcRenderer.invoke(IPC_CHANNELS.RAG_CLEAR);
+  },
+
+  // State persistence
+  /**
+   * Save app state for persistence
+   */
+  saveState: (state: PersistedState): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.STATE_SAVE, state);
+  },
+
+  /**
+   * Load persisted app state
+   */
+  loadState: (): Promise<PersistedState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.STATE_LOAD);
   },
 };
 

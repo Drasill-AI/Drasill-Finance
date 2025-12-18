@@ -1,5 +1,5 @@
-/* Inter Font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* IBM Plex Mono Font */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   /* Core Background Palette */
@@ -46,8 +46,8 @@
   --panel-radius: 0px;
   
   /* Typography */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  font-family: 'IBM Plex Mono', 'Consolas', 'Monaco', monospace;
+  font-feature-settings: 'zero', 'ss01';
 }
 
 * {

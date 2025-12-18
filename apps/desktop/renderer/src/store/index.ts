@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tab, TreeNode, getFileType, ChatMessage, FileContext } from '@drasill/shared';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState } from '@drasill/shared';
 
 interface ToastMessage {
   id: string;
@@ -68,6 +68,11 @@ interface AppState {
   indexWorkspace: () => Promise<void>;
   checkRagStatus: () => Promise<void>;
   clearRagIndex: () => Promise<void>;
+
+  // State persistence
+  savePersistedState: () => Promise<void>;
+  loadPersistedState: () => Promise<void>;
+  restoreWorkspace: (path: string) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -111,6 +116,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             children,
           }],
         });
+        // Persist state
+        get().savePersistedState();
       }
     } catch (error) {
       get().showToast('error', `Failed to open workspace: ${error}`);
@@ -194,6 +201,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
       }));
+      // Persist state
+      get().savePersistedState();
       return;
     }
 
@@ -227,6 +236,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         fileContents: newContents,
         loadingFiles: newLoading,
       }));
+      // Persist state
+      get().savePersistedState();
     } catch (error) {
       const newLoading = new Set(get().loadingFiles);
       newLoading.delete(path);
@@ -267,6 +278,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabViewStates: newViewStates,
       };
     });
+    // Persist state after closing tab
+    get().savePersistedState();
   },
 
   closeActiveTab: () => {
@@ -278,6 +291,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setActiveTab: (tabId: string) => {
     set({ activeTabId: tabId });
+    // Persist active tab change
+    get().savePersistedState();
   },
 
   saveTabViewState: (tabId: string, viewState: unknown) => {
@@ -484,8 +499,70 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showToast('error', 'Failed to clear knowledge base');
     }
   },
+
+  // State persistence
+  savePersistedState: async () => {
+    const { workspacePath, tabs, activeTabId } = get();
+    const state: PersistedState = {
+      workspacePath,
+      openTabs: tabs.map(t => ({
+        id: t.id,
+        name: t.name,
+        path: t.path,
+        type: t.type,
+      })),
+      activeTabId,
+    };
+    try {
+      await window.electronAPI.saveState(state);
+    } catch (error) {
+      console.error('Failed to save state:', error);
+    }
+  },
+
+  loadPersistedState: async () => {
+    try {
+      const state = await window.electronAPI.loadState();
+      if (state?.workspacePath) {
+        await get().restoreWorkspace(state.workspacePath);
+        
+        // Restore tabs
+        if (state.openTabs && state.openTabs.length > 0) {
+          for (const tab of state.openTabs) {
+            await get().openFile(tab.path, tab.name);
+          }
+          // Set active tab
+          if (state.activeTabId) {
+            set({ activeTabId: state.activeTabId });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load persisted state:', error);
+    }
+  },
+
+  restoreWorkspace: async (workspacePath: string) => {
+    try {
+      set({ workspacePath, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
+      const children = await get().loadDirectory(workspacePath);
+      set({
+        tree: [{
+          id: workspacePath,
+          name: workspacePath.split(/[\\/]/).pop() || workspacePath,
+          path: workspacePath,
+          isDirectory: true,
+          isExpanded: true,
+          children,
+        }],
+      });
+    } catch (error) {
+      get().showToast('error', `Failed to restore workspace: ${error}`);
+    }
+  },
 }));
 
 // Initialize on store creation
 useAppStore.getState().checkApiKey();
 useAppStore.getState().checkRagStatus();
+useAppStore.getState().loadPersistedState();
