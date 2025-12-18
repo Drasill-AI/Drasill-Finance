@@ -1,5 +1,5 @@
 .tabBar {
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   height: var(--tab-height);
   display: flex;
@@ -14,22 +14,23 @@
 }
 
 .tabs::-webkit-scrollbar {
-  height: 3px;
+  height: 0px;
 }
 
 .tab {
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 14px;
   height: 100%;
   min-width: 100px;
   max-width: 200px;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
-  border-right: 1px solid var(--border-color);
-  background-color: var(--bg-tertiary);
-  transition: background-color 0.1s;
+  border-right: 1px solid var(--border-subtle);
+  background-color: transparent;
+  transition: background-color 0.12s ease;
   flex-shrink: 0;
+  position: relative;
 }
 
 .tab:hover {
@@ -38,13 +39,23 @@
 
 .tab.active {
   background-color: var(--bg-primary);
-  border-bottom: 2px solid var(--accent);
-  margin-bottom: -1px;
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .icon {
-  font-size: 12px;
+  font-size: 13px;
   flex-shrink: 0;
+  opacity: 0.75;
 }
 
 .name {
@@ -53,27 +64,33 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  color: var(--text-secondary);
+}
+
+.tab.active .name {
+  color: var(--text-primary);
 }
 
 .closeButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  font-size: 16px;
-  color: var(--text-secondary);
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  color: var(--text-muted);
   border-radius: 4px;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.1s, background-color 0.1s;
+  transition: all 0.12s ease;
 }
 
 .tab:hover .closeButton {
-  opacity: 1;
+  opacity: 0.7;
 }
 
 .closeButton:hover {
+  opacity: 1;
   background-color: var(--bg-hover);
   color: var(--text-primary);
 }

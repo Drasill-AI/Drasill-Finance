@@ -6,13 +6,14 @@
 }
 
 .header {
-  padding: 10px 16px;
+  padding: 12px 16px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.10em;
   color: var(--text-secondary);
   text-transform: uppercase;
-  border-bottom: 1px solid var(--border-color);
+  opacity: 0.70;
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -29,8 +30,11 @@
 }
 
 .ragBadge {
-  font-size: 12px;
-  opacity: 0.8;
+  font-size: 10px;
+  opacity: 0.6;
+  padding: 2px 6px;
+  background: var(--bg-hover);
+  border-radius: 3px;
 }
 
 .settingsButton,
@@ -39,34 +43,38 @@
   border: none;
   cursor: pointer;
   font-size: 14px;
-  padding: 4px;
-  opacity: 0.7;
+  padding: 4px 6px;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+  border-radius: 4px;
 }
 
 .settingsButton:hover,
 .closeButton:hover {
   opacity: 1;
+  background: var(--bg-hover);
 }
 
 /* Indexing progress bar */
 .indexingBar {
-  padding: 8px 16px;
-  background-color: var(--accent);
-  background: linear-gradient(90deg, var(--accent) 0%, #4a90d9 100%);
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--accent) 0%, #6BA3FF 100%);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .indexingText {
   font-size: 11px;
   color: white;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .progressBar {
-  height: 4px;
-  background-color: rgba(255, 255, 255, 0.3);
+  height: 3px;
+  background-color: rgba(255, 255, 255, 0.25);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -81,15 +89,16 @@
 .contextBar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-color);
+  gap: 10px;
+  padding: 10px 16px;
+  background-color: rgba(76, 141, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 12px;
 }
 
 .contextIcon {
   font-size: 14px;
+  opacity: 0.7;
 }
 
 .contextFile {
@@ -103,9 +112,13 @@
 
 .contextLabel {
   color: var(--accent);
-  font-size: 10px;
+  font-size: 9px;
   text-transform: uppercase;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  background: var(--accent-glow);
+  border-radius: 3px;
 }
 
 .content {
@@ -116,84 +129,95 @@
 
 .placeholder {
   text-align: center;
-  padding: 24px 0;
+  padding: 32px 16px;
 }
 
 .icon {
   font-size: 48px;
   display: block;
   margin-bottom: 16px;
+  opacity: 0.4;
 }
 
 .placeholder h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .placeholder p {
   font-size: 13px;
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  line-height: 1.5;
 }
 
 .configureButton {
   background-color: var(--accent);
   color: white;
-  padding: 8px 16px;
-  border-radius: 4px;
+  padding: 10px 20px;
+  border-radius: 6px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .configureButton:hover {
-  opacity: 0.9;
+  background-color: var(--accent-hover);
+  transform: translateY(-1px);
 }
 
 .contextHint {
   font-size: 12px;
   color: var(--text-secondary);
   background-color: var(--bg-tertiary);
-  padding: 8px 12px;
-  border-radius: 4px;
+  padding: 10px 14px;
+  border-radius: 6px;
   display: inline-block;
+  line-height: 1.4;
 }
 
 /* Messages */
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .message {
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 14px 16px;
 }
 
 .message.user {
-  background-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, #6BA3FF 100%);
   color: white;
-  margin-left: 24px;
+  margin-left: 20px;
+  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .message.assistant {
   background-color: var(--bg-tertiary);
   color: var(--text-primary);
-  margin-right: 24px;
+  margin-right: 20px;
+  border: 1px solid var(--border-subtle);
 }
 
 .messageHeader {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  margin-bottom: 6px;
-  opacity: 0.8;
+  margin-bottom: 8px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .messageContent {
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -205,40 +229,46 @@
 
 /* Error & Action Bars */
 .errorBar {
-  padding: 8px 16px;
-  background-color: var(--error-bg, #ff000020);
-  color: var(--error-color, #ff4444);
+  padding: 10px 16px;
+  background-color: var(--error-bg);
+  color: var(--error);
   font-size: 12px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .actionBar {
   display: flex;
   gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-color);
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .clearButton,
 .cancelButton {
-  padding: 4px 12px;
+  padding: 6px 14px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: 5px;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .clearButton {
   background-color: var(--bg-tertiary);
   color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.clearButton:hover {
+  background-color: var(--bg-hover);
 }
 
 .cancelButton {
-  background-color: var(--error-color, #ff4444);
+  background-color: var(--error);
   color: white;
 }
 
 .clearButton:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -246,12 +276,13 @@
 .settingsContent {
   flex: 1;
   padding: 24px 16px;
+  overflow-y: auto;
 }
 
 .settingsForm {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .label {
@@ -263,138 +294,179 @@
 .hint {
   font-size: 11px;
   color: var(--text-muted);
+  line-height: 1.4;
 }
 
 .saveButton {
   background-color: var(--accent);
   color: white;
-  padding: 10px 16px;
-  border-radius: 4px;
+  padding: 12px 20px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.saveButton:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-1px);
 }
 
 .saveButton:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
 }
 
 .success {
   font-size: 12px;
-  color: var(--success-color, #4caf50);
+  color: var(--success);
+  padding: 8px 12px;
+  background: var(--success-bg);
+  border-radius: 5px;
 }
 
-/* Input Area */
+/* Input Area - Console Style */
 .inputArea {
-  padding: 12px;
+  padding: 12px 16px;
   border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.15);
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .input {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 14px;
   font-size: 13px;
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary, #ffffff);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 8px;
   resize: none;
-  min-height: 36px;
+  min-height: 40px;
   max-height: 120px;
   font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  line-height: 1.4;
 }
 
 .input::placeholder {
-  color: var(--text-muted, #888888);
+  color: var(--text-muted);
 }
 
 .input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .input:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .sendButton {
-  padding: 8px 16px;
-  background-color: var(--accent);
+  padding: 10px 18px;
+  background: linear-gradient(135deg, var(--accent) 0%, #6BA3FF 100%);
   color: white;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  align-self: flex-end;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px var(--accent-glow);
+  flex-shrink: 0;
+}
+
+.sendButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--accent-glow);
 }
 
 .sendButton:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
 }
 
 /* RAG Settings */
 .divider {
   height: 1px;
-  background-color: var(--border-color);
-  margin: 16px 0;
+  background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+  margin: 20px 0;
 }
 
 .ragStatus {
   font-size: 13px;
   color: var(--text-primary);
-  padding: 8px 12px;
+  padding: 10px 14px;
   background-color: var(--bg-tertiary);
-  border-radius: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
 }
 
 .ragButtons {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .reindexButton,
 .indexButton {
   flex: 1;
-  background-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, #6BA3FF 100%);
   color: white;
-  padding: 10px 16px;
-  border-radius: 4px;
+  padding: 12px 18px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.reindexButton:hover,
+.indexButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--accent-glow);
 }
 
 .reindexButton:disabled,
 .indexButton:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
 }
 
 .clearRagButton {
   background-color: var(--bg-tertiary);
   color: var(--text-secondary);
-  padding: 10px 16px;
-  border-radius: 4px;
+  padding: 12px 18px;
+  border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
+  border: 1px solid var(--border-color);
+  transition: all 0.15s ease;
+}
+
+.clearRagButton:hover {
+  background-color: var(--bg-hover);
 }
 
 .clearRagButton:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .ragHint {
   font-size: 12px;
-  color: var(--success-color, #4caf50);
-  background-color: var(--bg-tertiary);
-  padding: 8px 12px;
-  border-radius: 4px;
+  color: var(--success);
+  background-color: var(--success-bg);
+  padding: 10px 14px;
+  border-radius: 6px;
   display: inline-block;
-  margin-top: 8px;
+  margin-top: 10px;
 }

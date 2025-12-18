@@ -50,7 +50,14 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
     ],
     "win": {
       "target": "nsis",
