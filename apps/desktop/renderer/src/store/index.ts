@@ -1,0 +1,491 @@
+import { create } from 'zustand';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext } from '@drasill/shared';
+
+interface ToastMessage {
+  id: string;
+  type: 'error' | 'success' | 'info';
+  message: string;
+}
+
+interface AppState {
+  // Workspace
+  workspacePath: string | null;
+  tree: TreeNode[];
+  isLoadingTree: boolean;
+
+  // Chat
+  chatMessages: ChatMessage[];
+  isChatLoading: boolean;
+  chatError: string | null;
+  hasApiKey: boolean;
+
+  // RAG
+  isIndexing: boolean;
+  indexingProgress: { current: number; total: number; fileName: string; percentage: number } | null;
+  ragChunksCount: number;
+
+  // Tabs
+  tabs: Tab[];
+  activeTabId: string | null;
+  
+  // File content cache
+  fileContents: Map<string, string>;
+  loadingFiles: Set<string>;
+
+  // UI state
+  isCommandPaletteOpen: boolean;
+  toasts: ToastMessage[];
+
+  // Tab view states (for Monaco)
+  tabViewStates: Map<string, unknown>;
+
+  // Actions
+  openWorkspace: () => Promise<void>;
+  setWorkspacePath: (path: string | null) => void;
+  loadDirectory: (path: string) => Promise<TreeNode[]>;
+  toggleDirectory: (node: TreeNode) => Promise<void>;
+  
+  openFile: (path: string, name: string) => Promise<void>;
+  closeTab: (tabId: string) => void;
+  closeActiveTab: () => void;
+  setActiveTab: (tabId: string) => void;
+  saveTabViewState: (tabId: string, viewState: unknown) => void;
+  getTabViewState: (tabId: string) => unknown | undefined;
+
+  toggleCommandPalette: () => void;
+  
+  showToast: (type: ToastMessage['type'], message: string) => void;
+  dismissToast: (id: string) => void;
+
+  // Chat actions
+  checkApiKey: () => Promise<void>;
+  setApiKey: (key: string) => Promise<void>;
+  sendMessage: (content: string, fileContext?: FileContext) => Promise<void>;
+  clearChat: () => void;
+  cancelChat: () => void;
+
+  // RAG actions
+  indexWorkspace: () => Promise<void>;
+  checkRagStatus: () => Promise<void>;
+  clearRagIndex: () => Promise<void>;
+}
+
+export const useAppStore = create<AppState>((set, get) => ({
+  // Initial state
+  workspacePath: null,
+  tree: [],
+  isLoadingTree: false,
+  tabs: [],
+  activeTabId: null,
+  fileContents: new Map(),
+  loadingFiles: new Set(),
+  isCommandPaletteOpen: false,
+  toasts: [],
+  tabViewStates: new Map(),
+  
+  // Chat state
+  chatMessages: [],
+  isChatLoading: false,
+  chatError: null,
+  hasApiKey: false,
+
+  // RAG state
+  isIndexing: false,
+  indexingProgress: null,
+  ragChunksCount: 0,
+
+  // Actions
+  openWorkspace: async () => {
+    try {
+      const path = await window.electronAPI.selectWorkspace();
+      if (path) {
+        set({ workspacePath: path, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
+        const children = await get().loadDirectory(path);
+        set({
+          tree: [{
+            id: path,
+            name: path.split(/[\\/]/).pop() || path,
+            path: path,
+            isDirectory: true,
+            isExpanded: true,
+            children,
+          }],
+        });
+      }
+    } catch (error) {
+      get().showToast('error', `Failed to open workspace: ${error}`);
+    }
+  },
+
+  setWorkspacePath: (path) => {
+    set({ workspacePath: path });
+  },
+
+  loadDirectory: async (path: string): Promise<TreeNode[]> => {
+    try {
+      const entries = await window.electronAPI.readDir(path);
+      return entries.map((entry) => ({
+        id: entry.path,
+        name: entry.name,
+        path: entry.path,
+        isDirectory: entry.isDirectory,
+        extension: entry.extension,
+        isExpanded: false,
+        children: entry.isDirectory ? undefined : undefined,
+      }));
+    } catch (error) {
+      get().showToast('error', `Failed to read directory: ${error}`);
+      return [];
+    }
+  },
+
+  toggleDirectory: async (node: TreeNode) => {
+    const updateNode = (nodes: TreeNode[], targetId: string, updater: (n: TreeNode) => TreeNode): TreeNode[] => {
+      return nodes.map((n) => {
+        if (n.id === targetId) {
+          return updater(n);
+        }
+        if (n.children) {
+          return { ...n, children: updateNode(n.children, targetId, updater) };
+        }
+        return n;
+      });
+    };
+
+    if (node.isExpanded) {
+      // Collapse
+      set((state) => ({
+        tree: updateNode(state.tree, node.id, (n) => ({ ...n, isExpanded: false })),
+      }));
+    } else {
+      // Expand and load children
+      const children = await get().loadDirectory(node.path);
+      set((state) => ({
+        tree: updateNode(state.tree, node.id, (n) => ({
+          ...n,
+          isExpanded: true,
+          children,
+        })),
+      }));
+    }
+  },
+
+  openFile: async (path: string, name: string) => {
+    const { tabs, fileContents, loadingFiles } = get();
+
+    // Check if already open
+    const existingTab = tabs.find((t) => t.path === path);
+    if (existingTab) {
+      set({ activeTabId: existingTab.id });
+      return;
+    }
+
+    const fileType = getFileType(path);
+
+    // For PDF, just create a tab without loading content
+    if (fileType === 'pdf') {
+      const newTab: Tab = {
+        id: path,
+        name,
+        path,
+        type: 'pdf',
+      };
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+      }));
+      return;
+    }
+
+    // Skip if already loading
+    if (loadingFiles.has(path)) return;
+
+    // Load file content
+    set((state) => ({
+      loadingFiles: new Set(state.loadingFiles).add(path),
+    }));
+
+    try {
+      const result = await window.electronAPI.readFile(path);
+      
+      const newTab: Tab = {
+        id: path,
+        name,
+        path,
+        type: fileType,
+      };
+
+      const newContents = new Map(get().fileContents);
+      newContents.set(path, result.content);
+
+      const newLoading = new Set(get().loadingFiles);
+      newLoading.delete(path);
+
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        fileContents: newContents,
+        loadingFiles: newLoading,
+      }));
+    } catch (error) {
+      const newLoading = new Set(get().loadingFiles);
+      newLoading.delete(path);
+      set({ loadingFiles: newLoading });
+      get().showToast('error', `Failed to open file: ${error}`);
+    }
+  },
+
+  closeTab: (tabId: string) => {
+    set((state) => {
+      const tabIndex = state.tabs.findIndex((t) => t.id === tabId);
+      const newTabs = state.tabs.filter((t) => t.id !== tabId);
+      
+      // Clean up file content
+      const newContents = new Map(state.fileContents);
+      newContents.delete(tabId);
+
+      // Clean up view state
+      const newViewStates = new Map(state.tabViewStates);
+      newViewStates.delete(tabId);
+
+      // Determine new active tab
+      let newActiveTabId = state.activeTabId;
+      if (state.activeTabId === tabId) {
+        if (newTabs.length === 0) {
+          newActiveTabId = null;
+        } else if (tabIndex >= newTabs.length) {
+          newActiveTabId = newTabs[newTabs.length - 1].id;
+        } else {
+          newActiveTabId = newTabs[tabIndex].id;
+        }
+      }
+
+      return {
+        tabs: newTabs,
+        activeTabId: newActiveTabId,
+        fileContents: newContents,
+        tabViewStates: newViewStates,
+      };
+    });
+  },
+
+  closeActiveTab: () => {
+    const { activeTabId, closeTab } = get();
+    if (activeTabId) {
+      closeTab(activeTabId);
+    }
+  },
+
+  setActiveTab: (tabId: string) => {
+    set({ activeTabId: tabId });
+  },
+
+  saveTabViewState: (tabId: string, viewState: unknown) => {
+    set((state) => {
+      const newViewStates = new Map(state.tabViewStates);
+      newViewStates.set(tabId, viewState);
+      return { tabViewStates: newViewStates };
+    });
+  },
+
+  getTabViewState: (tabId: string) => {
+    return get().tabViewStates.get(tabId);
+  },
+
+  toggleCommandPalette: () => {
+    set((state) => ({ isCommandPaletteOpen: !state.isCommandPaletteOpen }));
+  },
+
+  showToast: (type, message) => {
+    const id = Math.random().toString(36).slice(2);
+    set((state) => ({
+      toasts: [...state.toasts, { id, type, message }],
+    }));
+
+    // Auto dismiss after 5 seconds
+    setTimeout(() => {
+      get().dismissToast(id);
+    }, 5000);
+  },
+
+  dismissToast: (id) => {
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    }));
+  },
+
+  // Chat actions
+  checkApiKey: async () => {
+    try {
+      const result = await window.electronAPI.getApiKey();
+      set({ hasApiKey: result.hasKey });
+    } catch {
+      set({ hasApiKey: false });
+    }
+  },
+
+  setApiKey: async (key: string) => {
+    try {
+      await window.electronAPI.setApiKey(key);
+      set({ hasApiKey: true, chatError: null });
+    } catch (error) {
+      set({ chatError: 'Failed to save API key' });
+    }
+  },
+
+  sendMessage: async (content: string, fileContext?: FileContext) => {
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+    };
+
+    set((state) => ({
+      chatMessages: [...state.chatMessages, userMessage],
+      isChatLoading: true,
+      chatError: null,
+    }));
+
+    const assistantMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+
+    set((state) => ({
+      chatMessages: [...state.chatMessages, assistantMessage],
+    }));
+
+    // Set up stream listeners
+    const removeChunkListener = window.electronAPI.onChatStreamChunk((chunk) => {
+      set((state) => {
+        const messages = [...state.chatMessages];
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant') {
+          messages[messages.length - 1] = {
+            ...lastMsg,
+            content: lastMsg.content + chunk.delta,
+          };
+        }
+        return { chatMessages: messages };
+      });
+    });
+
+    const removeEndListener = window.electronAPI.onChatStreamEnd(() => {
+      set({ isChatLoading: false });
+      removeChunkListener();
+      removeEndListener();
+      removeErrorListener();
+    });
+
+    const removeErrorListener = window.electronAPI.onChatStreamError((data) => {
+      set((state) => {
+        // Remove the empty assistant message on error
+        const messages = state.chatMessages.filter(m => m.id !== assistantMessage.id);
+        return { 
+          chatMessages: messages, 
+          isChatLoading: false, 
+          chatError: data.error 
+        };
+      });
+      removeChunkListener();
+      removeEndListener();
+      removeErrorListener();
+    });
+
+    // Send the message
+    try {
+      const history = get().chatMessages.filter(m => m.id !== assistantMessage.id);
+      await window.electronAPI.sendChatMessage({
+        message: content,
+        context: fileContext,
+        history,
+      });
+    } catch (error) {
+      set({ isChatLoading: false, chatError: 'Failed to send message' });
+      removeChunkListener();
+      removeEndListener();
+      removeErrorListener();
+    }
+  },
+
+  clearChat: () => {
+    set({ chatMessages: [], chatError: null });
+  },
+
+  cancelChat: () => {
+    window.electronAPI.cancelChat();
+    set({ isChatLoading: false });
+  },
+
+  // RAG actions
+  indexWorkspace: async () => {
+    const { workspacePath, hasApiKey } = get();
+    if (!workspacePath) {
+      get().showToast('error', 'No workspace open');
+      return;
+    }
+    if (!hasApiKey) {
+      get().showToast('error', 'Please configure your API key first');
+      return;
+    }
+
+    set({ isIndexing: true, indexingProgress: null });
+
+    // Set up progress listener
+    const removeProgressListener = window.electronAPI.onRagIndexProgress((data) => {
+      set({ indexingProgress: data });
+    });
+
+    const removeCompleteListener = window.electronAPI.onRagIndexComplete((data) => {
+      set({ 
+        isIndexing: false, 
+        indexingProgress: null, 
+        ragChunksCount: data.chunksIndexed 
+      });
+      get().showToast('success', `Indexed ${data.filesIndexed} files (${data.chunksIndexed} chunks)`);
+      removeProgressListener();
+      removeCompleteListener();
+    });
+
+    try {
+      const result = await window.electronAPI.indexWorkspace(workspacePath);
+      if (!result.success) {
+        set({ isIndexing: false, indexingProgress: null });
+        get().showToast('error', result.error || 'Indexing failed');
+        removeProgressListener();
+        removeCompleteListener();
+      }
+    } catch (error) {
+      set({ isIndexing: false, indexingProgress: null });
+      get().showToast('error', 'Failed to index workspace');
+      removeProgressListener();
+      removeCompleteListener();
+    }
+  },
+
+  checkRagStatus: async () => {
+    try {
+      const status = await window.electronAPI.getRagStatus();
+      set({ isIndexing: status.isIndexing, ragChunksCount: status.chunksCount });
+    } catch {
+      // Ignore errors
+    }
+  },
+
+  clearRagIndex: async () => {
+    try {
+      await window.electronAPI.clearRagIndex();
+      set({ ragChunksCount: 0 });
+      get().showToast('info', 'Knowledge base cleared');
+    } catch {
+      get().showToast('error', 'Failed to clear knowledge base');
+    }
+  },
+}));
+
+// Initialize on store creation
+useAppStore.getState().checkApiKey();
+useAppStore.getState().checkRagStatus();

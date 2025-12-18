@@ -1,0 +1,158 @@
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { IPC_CHANNELS, DirEntry, FileStat, FileReadResult, ChatRequest, ChatStreamChunk } from '@drasill/shared';
+
+/**
+ * API exposed to the renderer process via contextBridge
+ */
+const api = {
+  /**
+   * Select a workspace folder via system dialog
+   */
+  selectWorkspace: (): Promise<string | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SELECT_WORKSPACE);
+  },
+
+  /**
+   * Read directory contents
+   */
+  readDir: (path: string): Promise<DirEntry[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.READ_DIR, path);
+  },
+
+  /**
+   * Read file contents
+   */
+  readFile: (path: string): Promise<FileReadResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.READ_FILE, path);
+  },
+
+  /**
+   * Get file/directory stats
+   */
+  stat: (path: string): Promise<FileStat> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.STAT, path);
+  },
+
+  /**
+   * Subscribe to menu events from main process
+   */
+  onMenuOpenWorkspace: (callback: () => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent) => callback();
+    ipcRenderer.on('menu:open-workspace', handler);
+    return () => ipcRenderer.removeListener('menu:open-workspace', handler);
+  },
+
+  onMenuCloseTab: (callback: () => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent) => callback();
+    ipcRenderer.on('menu:close-tab', handler);
+    return () => ipcRenderer.removeListener('menu:close-tab', handler);
+  },
+
+  onMenuCommandPalette: (callback: () => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent) => callback();
+    ipcRenderer.on('menu:command-palette', handler);
+    return () => ipcRenderer.removeListener('menu:command-palette', handler);
+  },
+
+  // Chat API
+  /**
+   * Send a chat message (initiates streaming response)
+   */
+  sendChatMessage: (request: ChatRequest): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SEND_MESSAGE, request);
+  },
+
+  /**
+   * Subscribe to chat stream chunks
+   */
+  onChatStreamChunk: (callback: (chunk: ChatStreamChunk) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, chunk: ChatStreamChunk) => callback(chunk);
+    ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_CHUNK, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_CHUNK, handler);
+  },
+
+  /**
+   * Subscribe to chat stream end
+   */
+  onChatStreamEnd: (callback: (data: { id: string; cancelled?: boolean }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { id: string; cancelled?: boolean }) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_END, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_END, handler);
+  },
+
+  /**
+   * Subscribe to chat stream errors
+   */
+  onChatStreamError: (callback: (data: { id?: string; error: string }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { id?: string; error: string }) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_ERROR, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_ERROR, handler);
+  },
+
+  /**
+   * Set OpenAI API key
+   */
+  setApiKey: (apiKey: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SET_API_KEY, apiKey);
+  },
+
+  /**
+   * Get API key info
+   */
+  getApiKey: (): Promise<{ hasKey: boolean; maskedKey: string | null }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_API_KEY);
+  },
+
+  /**
+   * Cancel ongoing chat stream
+   */
+  cancelChat: (): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_CANCEL);
+  },
+
+  // RAG API
+  /**
+   * Index workspace for RAG
+   */
+  indexWorkspace: (workspacePath: string): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RAG_INDEX_WORKSPACE, workspacePath);
+  },
+
+  /**
+   * Subscribe to RAG indexing progress
+   */
+  onRagIndexProgress: (callback: (data: { current: number; total: number; fileName: string; percentage: number }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { current: number; total: number; fileName: string; percentage: number }) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.RAG_INDEX_PROGRESS, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.RAG_INDEX_PROGRESS, handler);
+  },
+
+  /**
+   * Subscribe to RAG indexing complete
+   */
+  onRagIndexComplete: (callback: (data: { chunksIndexed: number; filesIndexed: number }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { chunksIndexed: number; filesIndexed: number }) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.RAG_INDEX_COMPLETE, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.RAG_INDEX_COMPLETE, handler);
+  },
+
+  /**
+   * Get RAG status
+   */
+  getRagStatus: (): Promise<{ isIndexing: boolean; chunksCount: number }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RAG_GET_STATUS);
+  },
+
+  /**
+   * Clear RAG index
+   */
+  clearRagIndex: (): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RAG_CLEAR);
+  },
+};
+
+// Expose the API to the renderer
+contextBridge.exposeInMainWorld('electronAPI', api);
+
+// Type declaration for the API
+export type ElectronAPI = typeof api;
