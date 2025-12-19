@@ -63,4 +63,49 @@
 
 .tree {
   padding: 2px 0;
+  flex: 1;
+}
+
+.footer {
+  padding: 12px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--panel-bg);
+}
+
+.addButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(76, 141, 255, 0.15), rgba(76, 141, 255, 0.08));
+  border: 1px solid rgba(76, 141, 255, 0.3);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.addButton:hover {
+  background: linear-gradient(135deg, rgba(76, 141, 255, 0.25), rgba(76, 141, 255, 0.15));
+  border-color: rgba(76, 141, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.addButton:active {
+  transform: translateY(0);
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.addButton svg {
+  width: 16px;
+  height: 16px;
 }

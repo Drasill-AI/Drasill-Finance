@@ -16,7 +16,9 @@ interface ElectronAPI {
   readDir: (path: string) => Promise<DirEntry[]>;
   readFile: (path: string) => Promise<FileReadResult>;
   readFileBinary: (path: string) => Promise<{ path: string; data: string }>;
+  readWordFile: (path: string) => Promise<{ path: string; content: string }>;
   stat: (path: string) => Promise<FileStat>;
+  addFiles: (workspacePath: string) => Promise<{ added: number; cancelled: boolean }>;
   onMenuOpenWorkspace: (callback: () => void) => () => void;
   onMenuCloseTab: (callback: () => void) => () => void;
   onMenuCommandPalette: (callback: () => void) => () => void;

@@ -96,6 +96,7 @@ export const IPC_CHANNELS = {
   READ_DIR: 'read-dir',
   READ_FILE: 'read-file',
   READ_FILE_BINARY: 'read-file-binary',
+  READ_WORD_FILE: 'read-word-file',
   STAT: 'stat',
   // Chat
   CHAT_SEND_MESSAGE: 'chat-send-message',
@@ -134,6 +135,8 @@ export const IPC_CHANNELS = {
   ANALYTICS_GET: 'analytics-get',
   // Database
   DB_INIT: 'db-init',
+  // File Operations
+  ADD_FILES: 'add-files',
 } as const;
 
 /**

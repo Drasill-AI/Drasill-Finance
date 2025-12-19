@@ -158,6 +158,74 @@ export function setupIpcHandlers(): void {
     }
   });
 
+  // Read Word document and extract text
+  ipcMain.handle(IPC_CHANNELS.READ_WORD_FILE, async (_event, filePath: string): Promise<{ path: string; content: string }> => {
+    try {
+      const mammoth = await import('mammoth');
+      const buffer = await fs.readFile(filePath);
+      const result = await mammoth.extractRawText({ buffer });
+      
+      return {
+        path: filePath,
+        content: result.value,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Failed to read Word file: ${filePath}`);
+    }
+  });
+
+  // Add files to workspace (copy selected files)
+  ipcMain.handle(IPC_CHANNELS.ADD_FILES, async (_event, workspacePath: string): Promise<{ added: number; cancelled: boolean }> => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Add Files to Workspace',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Documents', extensions: ['pdf', 'md', 'txt', 'markdown'] },
+          { name: 'PDF Files', extensions: ['pdf'] },
+          { name: 'Markdown Files', extensions: ['md', 'markdown'] },
+          { name: 'Text Files', extensions: ['txt'] },
+        ],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { added: 0, cancelled: true };
+      }
+
+      let addedCount = 0;
+      const fsSync = await import('fs');
+      
+      for (const sourcePath of result.filePaths) {
+        const fileName = path.basename(sourcePath);
+        const destPath = path.join(workspacePath, fileName);
+        
+        // Check if file already exists
+        try {
+          await fs.access(destPath);
+          // File exists, skip with a unique name
+          const ext = path.extname(fileName);
+          const baseName = path.basename(fileName, ext);
+          const timestamp = Date.now();
+          const newDestPath = path.join(workspacePath, `${baseName}_${timestamp}${ext}`);
+          fsSync.copyFileSync(sourcePath, newDestPath);
+          addedCount++;
+        } catch {
+          // File doesn't exist, copy normally
+          fsSync.copyFileSync(sourcePath, destPath);
+          addedCount++;
+        }
+      }
+
+      return { added: addedCount, cancelled: false };
+    } catch (error) {
+      console.error('Failed to add files:', error);
+      throw new Error(`Failed to add files: ${error}`);
+    }
+  });
+
   // Get file/directory stats
   ipcMain.handle(IPC_CHANNELS.STAT, async (_event, targetPath: string): Promise<FileStat> => {
     try {

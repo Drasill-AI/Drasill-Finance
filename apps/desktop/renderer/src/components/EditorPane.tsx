@@ -3,6 +3,7 @@ import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useAppStore } from '../store';
 import { PdfViewer } from './PdfViewer';
+import { WordViewer } from './WordViewer';
 import styles from './EditorPane.module.css';
 import logoImage from '../assets/logo.png';
 
@@ -87,6 +88,11 @@ export function EditorPane() {
   // PDF viewer
   if (activeTab.type === 'pdf') {
     return <PdfViewer fileName={activeTab.name} path={activeTab.path} />;
+  }
+
+  // Word viewer
+  if (activeTab.type === 'word') {
+    return <WordViewer fileName={activeTab.name} path={activeTab.path} />;
   }
 
   // Monaco editor for text/markdown

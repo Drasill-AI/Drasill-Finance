@@ -55,6 +55,7 @@ interface AppState {
   setWorkspacePath: (path: string | null) => void;
   loadDirectory: (path: string) => Promise<TreeNode[]>;
   toggleDirectory: (node: TreeNode) => Promise<void>;
+  refreshTree: () => Promise<void>;
   
   openFile: (path: string, name: string) => Promise<void>;
   closeTab: (tabId: string) => void;
@@ -185,6 +186,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  refreshTree: async () => {
+    const { workspacePath, loadDirectory } = get();
+    if (!workspacePath) return;
+    
+    try {
+      const children = await loadDirectory(workspacePath);
+      set({
+        tree: [{
+          id: workspacePath,
+          name: workspacePath.split(/[\\/]/).pop() || workspacePath,
+          path: workspacePath,
+          isDirectory: true,
+          isExpanded: true,
+          children,
+        }],
+      });
+    } catch (error) {
+      get().showToast('error', `Failed to refresh tree: ${error}`);
+    }
+  },
+
   toggleDirectory: async (node: TreeNode) => {
     const updateNode = (nodes: TreeNode[], targetId: string, updater: (n: TreeNode) => TreeNode): TreeNode[] => {
       return nodes.map((n) => {
@@ -228,13 +250,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const fileType = getFileType(path);
 
-    // For PDF, just create a tab without loading content
+    // For PDF, just create a tab without loading content (PDF viewer handles it)
     if (fileType === 'pdf') {
       const newTab: Tab = {
         id: path,
         name,
         path,
         type: 'pdf',
+      };
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+      }));
+      // Persist state
+      get().savePersistedState();
+      return;
+    }
+
+    // For Word files, just create a tab without loading content (Word viewer handles it)
+    if (fileType === 'word') {
+      const newTab: Tab = {
+        id: path,
+        name,
+        path,
+        type: 'word',
       };
       set((state) => ({
         tabs: [...state.tabs, newTab],

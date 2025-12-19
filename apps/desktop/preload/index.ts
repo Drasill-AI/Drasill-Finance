@@ -46,10 +46,24 @@ const api = {
   },
 
   /**
+   * Read Word document and extract text
+   */
+  readWordFile: (path: string): Promise<{ path: string; content: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.READ_WORD_FILE, path);
+  },
+
+  /**
    * Get file/directory stats
    */
   stat: (path: string): Promise<FileStat> => {
     return ipcRenderer.invoke(IPC_CHANNELS.STAT, path);
+  },
+
+  /**
+   * Add files to workspace (copy selected files)
+   */
+  addFiles: (workspacePath: string): Promise<{ added: number; cancelled: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ADD_FILES, workspacePath);
   },
 
   /**
