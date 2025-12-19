@@ -27,6 +27,13 @@ const api = {
   },
 
   /**
+   * Read file as binary (Base64) for PDFs and other binary files
+   */
+  readFileBinary: (path: string): Promise<{ path: string; data: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.READ_FILE_BINARY, path);
+  },
+
+  /**
    * Get file/directory stats
    */
   stat: (path: string): Promise<FileStat> => {

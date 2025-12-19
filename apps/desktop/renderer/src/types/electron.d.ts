@@ -1,9 +1,10 @@
-import type { DirEntry, FileStat, FileReadResult, ChatRequest, ChatStreamChunk } from '@drasill/shared';
+import type { DirEntry, FileStat, FileReadResult, ChatRequest, ChatStreamChunk, PersistedState } from '@drasill/shared';
 
 interface ElectronAPI {
   selectWorkspace: () => Promise<string | null>;
   readDir: (path: string) => Promise<DirEntry[]>;
   readFile: (path: string) => Promise<FileReadResult>;
+  readFileBinary: (path: string) => Promise<{ path: string; data: string }>;
   stat: (path: string) => Promise<FileStat>;
   onMenuOpenWorkspace: (callback: () => void) => () => void;
   onMenuCloseTab: (callback: () => void) => () => void;
@@ -22,6 +23,9 @@ interface ElectronAPI {
   onRagIndexComplete: (callback: (data: { chunksIndexed: number; filesIndexed: number }) => void) => () => void;
   getRagStatus: () => Promise<{ isIndexing: boolean; chunksCount: number }>;
   clearRagIndex: () => Promise<void>;
+  // State persistence
+  saveState: (state: PersistedState) => Promise<void>;
+  loadState: () => Promise<PersistedState>;
 }
 
 declare global {

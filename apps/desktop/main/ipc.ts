@@ -105,6 +105,32 @@ export function setupIpcHandlers(): void {
     }
   });
 
+  // Read file as binary (Base64) for PDFs and other binary files
+  ipcMain.handle(IPC_CHANNELS.READ_FILE_BINARY, async (_event, filePath: string): Promise<{ path: string; data: string }> => {
+    try {
+      const stats = await fs.stat(filePath);
+      
+      // 20MB limit for binary files
+      const MAX_BINARY_SIZE = 20 * 1024 * 1024;
+      if (stats.size > MAX_BINARY_SIZE) {
+        throw new Error(`File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB exceeds ${MAX_BINARY_SIZE / 1024 / 1024}MB limit`);
+      }
+
+      const buffer = await fs.readFile(filePath);
+      const base64 = buffer.toString('base64');
+      
+      return {
+        path: filePath,
+        data: base64,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Failed to read binary file: ${filePath}`);
+    }
+  });
+
   // Get file/directory stats
   ipcMain.handle(IPC_CHANNELS.STAT, async (_event, targetPath: string): Promise<FileStat> => {
     try {
@@ -133,7 +159,7 @@ export function setupIpcHandlers(): void {
   // Chat: Set API key
   ipcMain.handle(IPC_CHANNELS.CHAT_SET_API_KEY, async (_event, apiKey: string): Promise<boolean> => {
     try {
-      setApiKey(apiKey);
+      await setApiKey(apiKey);
       resetOpenAI(); // Reset OpenAI client in RAG module too
       return true;
     } catch (error) {
@@ -144,8 +170,8 @@ export function setupIpcHandlers(): void {
   // Chat: Get API key (masked)
   ipcMain.handle(IPC_CHANNELS.CHAT_GET_API_KEY, async (): Promise<{ hasKey: boolean; maskedKey: string | null }> => {
     return {
-      hasKey: hasApiKey(),
-      maskedKey: getApiKey(),
+      hasKey: await hasApiKey(),
+      maskedKey: await getApiKey(),
     };
   });
 

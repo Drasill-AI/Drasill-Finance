@@ -1,19 +1,12 @@
 import OpenAI from 'openai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import Store from 'electron-store';
 import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, IGNORED_PATTERNS } from '@drasill/shared';
+import * as keychain from './keychain';
 
 // For Word doc parsing
 import mammoth from 'mammoth';
-
-const store = new Store({
-  name: 'drasill-config',
-  encryptionKey: 'drasill-cloud-secure-key-2024',
-});
-
-const API_KEY_STORE_KEY = 'openai-api-key';
 
 interface DocumentChunk {
   id: string;
@@ -40,11 +33,11 @@ const CHUNK_OVERLAP = 200; // Overlap between chunks
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB max per file
 
 /**
- * Initialize OpenAI client
+ * Initialize OpenAI client (async for keychain access)
  */
-function getOpenAI(): OpenAI | null {
+async function getOpenAI(): Promise<OpenAI | null> {
   if (!openai) {
-    const apiKey = store.get(API_KEY_STORE_KEY) as string | undefined;
+    const apiKey = await keychain.getApiKey();
     if (apiKey) {
       openai = new OpenAI({ apiKey });
     }
@@ -137,7 +130,7 @@ async function extractFileText(filePath: string): Promise<string> {
  * Get embedding for text using OpenAI
  */
 async function getEmbedding(text: string): Promise<number[]> {
-  const client = getOpenAI();
+  const client = await getOpenAI();
   if (!client) {
     throw new Error('OpenAI API key not configured');
   }
@@ -218,7 +211,7 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
     return { success: false, chunksIndexed: 0, error: 'Indexing already in progress' };
   }
   
-  const client = getOpenAI();
+  const client = await getOpenAI();
   if (!client) {
     return { success: false, chunksIndexed: 0, error: 'OpenAI API key not configured' };
   }

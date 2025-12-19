@@ -95,6 +95,7 @@ export const IPC_CHANNELS = {
   SELECT_WORKSPACE: 'select-workspace',
   READ_DIR: 'read-dir',
   READ_FILE: 'read-file',
+  READ_FILE_BINARY: 'read-file-binary',
   STAT: 'stat',
   // Chat
   CHAT_SEND_MESSAGE: 'chat-send-message',

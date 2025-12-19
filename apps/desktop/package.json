@@ -1,6 +1,6 @@
 {
   "name": "@drasill/desktop",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "description": "Drasill Cloud Desktop App",
   "author": "Drasill AI LLC",
@@ -13,6 +13,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:preload": "tsc -p tsconfig.preload.json",
     "build:renderer": "vite build",
+    "postinstall": "npx @electron/rebuild",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
@@ -20,9 +21,13 @@
   },
   "dependencies": {
     "@drasill/shared": "*",
+    "@electron/rebuild": "^4.0.2",
     "electron-store": "^8.2.0",
+    "keytar": "^7.9.0",
     "mammoth": "^1.11.0",
     "openai": "^4.104.0",
+    "pdfjs-dist": "^5.4.296",
+    "react-pdf": "^10.2.0",
     "vectra": "^0.11.1"
   },
   "devDependencies": {
@@ -60,6 +65,9 @@
         "to": "assets"
       }
     ],
+    "asarUnpack": [
+      "node_modules/keytar/**/*"
+    ],
     "nsis": {
       "oneClick": true,
       "installerIcon": "assets/icon.ico",
@@ -67,8 +75,9 @@
       "installerHeaderIcon": "assets/icon.ico"
     },
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
     "mac": {
       "target": "dmg",

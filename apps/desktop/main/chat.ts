@@ -1,16 +1,8 @@
 import OpenAI from 'openai';
-import Store from 'electron-store';
 import { BrowserWindow } from 'electron';
 import { ChatRequest, IPC_CHANNELS, FileContext } from '@drasill/shared';
 import { getRAGContext, getIndexingStatus } from './rag';
-
-// Encrypted store for API key
-const store = new Store({
-  name: 'drasill-config',
-  encryptionKey: 'drasill-cloud-secure-key-2024',
-});
-
-const API_KEY_STORE_KEY = 'openai-api-key';
+import * as keychain from './keychain';
 
 let openai: OpenAI | null = null;
 let abortController: AbortController | null = null;
@@ -18,8 +10,8 @@ let abortController: AbortController | null = null;
 /**
  * Initialize OpenAI client with stored API key
  */
-function initializeOpenAI(): boolean {
-  const apiKey = store.get(API_KEY_STORE_KEY) as string | undefined;
+async function initializeOpenAI(): Promise<boolean> {
+  const apiKey = await keychain.getApiKey();
   if (apiKey) {
     openai = new OpenAI({ apiKey });
     return true;
@@ -28,28 +20,28 @@ function initializeOpenAI(): boolean {
 }
 
 /**
- * Set the OpenAI API key
+ * Set the OpenAI API key (stores in OS keychain)
  */
-export function setApiKey(apiKey: string): void {
-  store.set(API_KEY_STORE_KEY, apiKey);
-  openai = new OpenAI({ apiKey });
+export async function setApiKey(apiKey: string): Promise<boolean> {
+  const success = await keychain.setApiKey(apiKey);
+  if (success) {
+    openai = new OpenAI({ apiKey });
+  }
+  return success;
 }
 
 /**
  * Get the OpenAI API key (masked)
  */
-export function getApiKey(): string | null {
-  const apiKey = store.get(API_KEY_STORE_KEY) as string | undefined;
-  if (!apiKey) return null;
-  // Return masked version
-  return apiKey.slice(0, 7) + '...' + apiKey.slice(-4);
+export async function getApiKey(): Promise<string | null> {
+  return keychain.getMaskedApiKey();
 }
 
 /**
  * Check if API key is configured
  */
-export function hasApiKey(): boolean {
-  return !!store.get(API_KEY_STORE_KEY);
+export async function hasApiKey(): Promise<boolean> {
+  return keychain.hasApiKey();
 }
 
 /**
@@ -123,8 +115,8 @@ export async function sendChatMessage(
   window: BrowserWindow,
   request: ChatRequest
 ): Promise<void> {
-  // Initialize if needed
-  if (!openai && !initializeOpenAI()) {
+  // Initialize if needed (now async for keychain access)
+  if (!openai && !(await initializeOpenAI())) {
     window.webContents.send(IPC_CHANNELS.CHAT_STREAM_ERROR, {
       error: 'OpenAI API key not configured. Please set your API key in settings.',
     });
