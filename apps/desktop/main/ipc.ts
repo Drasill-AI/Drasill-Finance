@@ -12,9 +12,12 @@ import {
   BINARY_EXTENSIONS, 
   ChatRequest, 
   PersistedState,
+  SchematicToolCall,
+  SchematicToolResponse,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
 import { indexWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI } from './rag';
+import { processSchematicToolCall, getSchematicImage } from './schematic';
 import {
   getDatabase,
   createEquipment,
@@ -440,4 +443,42 @@ export function setupIpcHandlers(): void {
     const allEquipment = getAllEquipment();
     return allEquipment.map(eq => calculateEquipmentAnalytics(eq.id));
   });
+
+  // ==========================================
+  // Schematics
+  // ==========================================
+
+  // Process schematic tool call from OpenAI
+  ipcMain.handle(
+    IPC_CHANNELS.SCHEMATIC_PROCESS_TOOL_CALL,
+    async (_event, toolCall: SchematicToolCall): Promise<SchematicToolResponse> => {
+      try {
+        console.log('[IPC] Processing schematic tool call:', toolCall);
+        const response = await processSchematicToolCall(toolCall);
+        console.log('[IPC] Schematic tool call response:', response);
+        return response;
+      } catch (error) {
+        console.error('[IPC] Error processing schematic tool call:', error);
+        return {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    }
+  );
+
+  // Get schematic image as base64 data URL
+  ipcMain.handle(
+    IPC_CHANNELS.SCHEMATIC_GET_IMAGE,
+    async (_event, imagePath: string): Promise<string> => {
+      try {
+        console.log('[IPC] Getting schematic image:', imagePath);
+        const dataUrl = await getSchematicImage(imagePath);
+        return dataUrl;
+      } catch (error) {
+        console.error('[IPC] Error getting schematic image:', error);
+        throw error;
+      }
+    }
+  );
 }

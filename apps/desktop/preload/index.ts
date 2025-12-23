@@ -11,6 +11,8 @@ import {
   MaintenanceLog,
   FailureEvent,
   EquipmentAnalytics,
+  SchematicToolCall,
+  SchematicToolResponse,
 } from '@drasill/shared';
 
 /**
@@ -335,6 +337,24 @@ const api = {
    */
   getEquipmentAnalytics: (equipmentId?: string): Promise<EquipmentAnalytics[]> => {
     return ipcRenderer.invoke(IPC_CHANNELS.ANALYTICS_GET, equipmentId);
+  },
+
+  // ==========================================
+  // Schematics API
+  // ==========================================
+
+  /**
+   * Process schematic tool call from OpenAI
+   */
+  processSchematicToolCall: (toolCall: SchematicToolCall): Promise<SchematicToolResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SCHEMATIC_PROCESS_TOOL_CALL, toolCall);
+  },
+
+  /**
+   * Get schematic image as base64 data URL
+   */
+  getSchematicImage: (imagePath: string): Promise<string> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SCHEMATIC_GET_IMAGE, imagePath);
   },
 };
 

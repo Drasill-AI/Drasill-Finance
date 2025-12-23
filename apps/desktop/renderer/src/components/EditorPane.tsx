@@ -4,6 +4,7 @@ import type { editor } from 'monaco-editor';
 import { useAppStore } from '../store';
 import { PdfViewer } from './PdfViewer';
 import { WordViewer } from './WordViewer';
+import { SchematicViewer } from './SchematicViewer';
 import styles from './EditorPane.module.css';
 import logoImage from '../assets/logo.png';
 
@@ -93,6 +94,11 @@ export function EditorPane() {
   // Word viewer
   if (activeTab.type === 'word') {
     return <WordViewer fileName={activeTab.name} path={activeTab.path} />;
+  }
+
+  // Schematic viewer
+  if (activeTab.type === 'schematic' && activeTab.schematicData) {
+    return <SchematicViewer schematicData={activeTab.schematicData} />;
   }
 
   // Monaco editor for text/markdown

@@ -9,6 +9,8 @@ import type {
   MaintenanceLog,
   FailureEvent,
   EquipmentAnalytics,
+  SchematicToolCall,
+  SchematicToolResponse,
 } from '@drasill/shared';
 
 interface ElectronAPI {
@@ -61,6 +63,9 @@ interface ElectronAPI {
   getFailureEvents: (equipmentId?: string, limit?: number) => Promise<FailureEvent[]>;
   // Analytics API
   getEquipmentAnalytics: (equipmentId?: string) => Promise<EquipmentAnalytics[]>;
+  // Schematics API
+  processSchematicToolCall: (toolCall: SchematicToolCall) => Promise<SchematicToolResponse>;
+  getSchematicImage: (imagePath: string) => Promise<string>;
 }
 
 declare global {

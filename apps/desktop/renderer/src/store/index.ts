@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Equipment, BottomPanelState, MaintenanceLog } from '@drasill/shared';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Equipment, BottomPanelState, MaintenanceLog, SchematicToolCall, SchematicData } from '@drasill/shared';
 
 interface ToastMessage {
   id: string;
@@ -100,6 +100,9 @@ interface AppState {
   setBottomPanelOpen: (open: boolean) => void;
   setBottomPanelHeight: (height: number) => void;
   toggleBottomPanel: () => void;
+
+  // Schematic actions
+  openSchematicTab: (toolCall: SchematicToolCall) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -724,6 +727,62 @@ export const useAppStore = create<AppState>((set, get) => ({
       bottomPanelState: { ...state.bottomPanelState, isOpen: !state.bottomPanelState.isOpen },
     }));
     get().savePersistedState();
+  },
+
+  // Schematic actions
+  openSchematicTab: async (toolCall: SchematicToolCall) => {
+    try {
+      console.log('[Store] Opening schematic tab for:', toolCall);
+      
+      // Process the tool call via IPC
+      const response = await window.electronAPI.processSchematicToolCall(toolCall);
+      
+      if (response.status === 'error') {
+        throw new Error(response.message || 'Failed to retrieve schematic');
+      }
+
+      // Create schematic data
+      const schematicData: SchematicData = {
+        componentId: response.component_id || `schematic-${Date.now()}`,
+        componentName: response.component_name || toolCall.component_name,
+        machineModel: response.machine_model || toolCall.machine_model,
+        imagePath: response.image_path || '',
+        manualContext: response.manual_context || '',
+        timestamp: Date.now(),
+      };
+
+      // Check if tab already exists
+      const existingTab = get().tabs.find((t) => 
+        t.type === 'schematic' && 
+        t.schematicData?.componentId === schematicData.componentId
+      );
+
+      if (existingTab) {
+        set({ activeTabId: existingTab.id });
+        return;
+      }
+
+      // Create new schematic tab
+      const tabId = `schematic-${schematicData.componentId}`;
+      const newTab: Tab = {
+        id: tabId,
+        name: `🔧 ${schematicData.componentName}`,
+        path: schematicData.imagePath,
+        type: 'schematic',
+        schematicData,
+      };
+
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+      }));
+
+      get().showToast('success', `Opened schematic for ${schematicData.componentName}`);
+      get().savePersistedState();
+    } catch (error) {
+      console.error('[Store] Error opening schematic tab:', error);
+      get().showToast('error', `Failed to open schematic: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   },
 }));
 

@@ -11,3 +11,4 @@ export { TopBar } from './TopBar';
 export { BottomPanel } from './BottomPanel';
 export { LogEntryModal } from './LogEntryModal';
 export { EquipmentModal } from './EquipmentModal';
+export { SchematicViewer } from './SchematicViewer';
