@@ -22,14 +22,14 @@ export interface TreeNode {
  * Represents an open tab in the editor
  */
 export interface Tab {
-  /** Unique identifier (file path) */
+  /** Unique identifier (file path or schematic ID) */
   id: string;
   /** Display name */
   name: string;
-  /** Full file path */
+  /** Full file path (for file tabs) */
   path: string;
   /** File type for determining viewer */
-  type: 'text' | 'markdown' | 'pdf' | 'word' | 'unknown';
+  type: 'text' | 'markdown' | 'pdf' | 'word' | 'schematic' | 'unknown';
   /** Whether the tab has unsaved changes */
   isDirty?: boolean;
   /** Scroll position to restore */
@@ -39,6 +39,8 @@ export interface Tab {
   };
   /** Monaco view state for restoring cursor/selection */
   viewState?: unknown;
+  /** Schematic data (only for schematic tabs) */
+  schematicData?: SchematicData;
 }
 
 /**
@@ -81,7 +83,7 @@ export interface PersistedState {
     id: string;
     name: string;
     path: string;
-    type: 'text' | 'markdown' | 'pdf' | 'word' | 'unknown';
+    type: 'text' | 'markdown' | 'pdf' | 'word' | 'schematic' | 'unknown';
   }>;
   activeTabId: string | null;
   sidebarWidth?: number;
@@ -140,6 +142,9 @@ export const IPC_CHANNELS = {
   DB_INIT: 'db-init',
   // File Operations
   ADD_FILES: 'add-files',
+  // Schematics
+  SCHEMATIC_PROCESS_TOOL_CALL: 'schematic-process-tool-call',
+  SCHEMATIC_GET_IMAGE: 'schematic-get-image',
 } as const;
 
 /**
@@ -444,4 +449,50 @@ export interface BottomPanelState {
   isOpen: boolean;
   height: number;
   activeTab: 'logs' | 'analytics';
+}
+
+// ==========================================
+// Schematic Visualizer Types
+// ==========================================
+
+/**
+ * OpenAI tool call for schematic retrieval
+ */
+export interface SchematicToolCall {
+  component_name: string;
+  machine_model?: string;
+  additional_context?: string;
+}
+
+/**
+ * Response from Java schematic handler
+ */
+export interface SchematicToolResponse {
+  status: 'success' | 'error';
+  message?: string;
+  image_path?: string;
+  manual_context?: string;
+  component_id?: string;
+  component_name?: string;
+  machine_model?: string;
+}
+
+/**
+ * Schematic data stored in tab
+ */
+export interface SchematicData {
+  componentId: string;
+  componentName: string;
+  machineModel?: string;
+  imagePath: string;
+  manualContext: string;
+  timestamp: number;
+}
+
+/**
+ * Request to process OpenAI tool call
+ */
+export interface ProcessSchematicRequest {
+  toolCall: SchematicToolCall;
+  conversationId?: string;
 }

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schematic Visualizer Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #cccccc;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #007acc;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #4ec9b0;
+            margin-top: 30px;
+        }
+        .test-section {
+            background: #252525;
+            border: 1px solid #3e3e3e;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #005a9e;
+        }
+        button:active {
+            transform: translateY(1px);
+        }
+        .success {
+            background: #0e8a16;
+        }
+        .warning {
+            background: #d29922;
+        }
+        .danger {
+            background: #d73a49;
+        }
+        pre {
+            background: #1e1e1e;
+            border: 1px solid #3e3e3e;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        code {
+            background: #2d2d2d;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .status.success { background: #0e8a1644; border-left: 4px solid #0e8a16; }
+        .status.error { background: #d73a4944; border-left: 4px solid #d73a49; }
+        .status.info { background: #007acc44; border-left: 4px solid #007acc; }
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Schematic Visualizer Test Page</h1>
+    
+    <div class="status info">
+        <strong>Status:</strong> Ready to test. Open DevTools console (F12) to see detailed logs.
+    </div>
+
+    <div class="test-section">
+        <h2>Quick Tests</h2>
+        <p>Click these buttons to test the schematic visualizer functionality:</p>
+        
+        <div class="button-group">
+            <button onclick="testBasicSchematic()">🔧 Open Test Schematic</button>
+            <button onclick="testMultiple()" class="success">📊 Open 3 Schematics</button>
+            <button onclick="checkStatus()">ℹ️ Check Status</button>
+            <button onclick="clearAllTabs()" class="warning">🗑️ Close All Tabs</button>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Individual Component Tests</h2>
+        <div class="button-group">
+            <button onclick="openSchematic('Hydraulic Pump', 'HX-2000')">Hydraulic Pump</button>
+            <button onclick="openSchematic('Motor Assembly', 'M-500')">Motor Assembly</button>
+            <button onclick="openSchematic('Circuit Board', 'CB-200')">Circuit Board</button>
+            <button onclick="openSchematic('Valve Controller', 'VC-100')">Valve Controller</button>
+            <button onclick="openSchematic('PLC Unit', 'PLC-300')">PLC Unit</button>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Advanced Tests</h2>
+        <div class="button-group">
+            <button onclick="testDeduplication()">🔄 Test Deduplication</button>
+            <button onclick="testEdgeCases()" class="warning">⚠️ Test Edge Cases</button>
+            <button onclick="inspectState()">🔍 Inspect State</button>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Expected Behavior</h2>
+        <ul>
+            <li>✅ Clicking "Open Test Schematic" should create a new tab with a 🔧 icon</li>
+            <li>✅ The schematic viewer should display in the main editor area</li>
+            <li>✅ Mock data should show because Java service is not running</li>
+            <li>✅ Zoom controls should be visible and functional</li>
+            <li>✅ Service instructions should appear in the right panel</li>
+            <li>✅ Opening the same schematic twice should reuse the existing tab</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>Console Commands</h2>
+        <p>You can also run these commands directly in the console:</p>
+        <pre><code>// Open a single schematic
+testSchematic()
+
+// Open multiple schematics
+testMultipleSchematics()
+
+// Check current state
+inspectSchematicState()
+
+// Test deduplication
+testDeduplication()
+
+// Check API availability
+checkSchematicAPI()</code></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Integration with Chat</h2>
+        <p>To integrate with your chat system, add this to your chat tool handler:</p>
+        <pre><code>if (toolCall.function.name === 'retrieve_schematic') {
+  const args = JSON.parse(toolCall.function.arguments);
+  await useAppStore.getState().openSchematicTab(args);
+}</code></pre>
+    </div>
+
+    <script>
+        // Make store available globally for easy testing
+        setTimeout(() => {
+            if (window.useAppStore) {
+                console.log('✅ Store is available');
+            } else {
+                console.error('❌ Store not found - app may not be fully loaded');
+            }
+        }, 1000);
+
+        async function testBasicSchematic() {
+            console.log('Opening test schematic...');
+            try {
+                const store = window.useAppStore.getState();
+                await store.openSchematicTab({
+                    component_name: 'Test Hydraulic Pump',
+                    machine_model: 'HX-2000',
+                    additional_context: 'Main assembly'
+                });
+                alert('✅ Schematic tab opened! Check the tabs bar.');
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        async function testMultiple() {
+            console.log('Opening multiple schematics...');
+            const components = [
+                { component_name: 'Motor Assembly', machine_model: 'M-500' },
+                { component_name: 'Circuit Board', machine_model: 'CB-200' },
+                { component_name: 'Valve Controller', machine_model: 'VC-100' }
+            ];
+            
+            const store = window.useAppStore.getState();
+            for (const component of components) {
+                await store.openSchematicTab(component);
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            alert('✅ Opened 3 schematic tabs!');
+        }
+
+        async function openSchematic(name, model) {
+            console.log(`Opening ${name}...`);
+            const store = window.useAppStore.getState();
+            await store.openSchematicTab({
+                component_name: name,
+                machine_model: model
+            });
+        }
+
+        function checkStatus() {
+            const store = window.useAppStore.getState();
+            const schematicTabs = store.tabs.filter(t => t.type === 'schematic');
+            const message = `
+📊 Current Status:
+• Total tabs: ${store.tabs.length}
+• Schematic tabs: ${schematicTabs.length}
+• Active tab: ${store.activeTabId ? 'Yes' : 'No'}
+
+${schematicTabs.length > 0 ? '\nSchematic Tabs:\n' + schematicTabs.map(t => `  • ${t.name}`).join('\n') : 'No schematic tabs open'}
+            `;
+            alert(message);
+            console.log(message);
+        }
+
+        function clearAllTabs() {
+            const store = window.useAppStore.getState();
+            const schematicTabs = store.tabs.filter(t => t.type === 'schematic');
+            
+            if (schematicTabs.length === 0) {
+                alert('No schematic tabs to close');
+                return;
+            }
+
+            if (confirm(`Close ${schematicTabs.length} schematic tab(s)?`)) {
+                schematicTabs.forEach(tab => {
+                    store.closeTab(tab.id);
+                });
+                alert('✅ All schematic tabs closed');
+            }
+        }
+
+        async function testDeduplication() {
+            console.log('Testing deduplication...');
+            const store = window.useAppStore.getState();
+            const testData = { component_name: 'Dedup Test', machine_model: 'TEST-001' };
+            
+            await store.openSchematicTab(testData);
+            const count1 = store.tabs.filter(t => t.type === 'schematic').length;
+            
+            await store.openSchematicTab(testData);
+            const count2 = store.tabs.filter(t => t.type === 'schematic').length;
+            
+            if (count1 === count2) {
+                alert('✅ Deduplication working! Only one tab created.');
+            } else {
+                alert('❌ Deduplication failed! Multiple tabs created.');
+            }
+        }
+
+        async function testEdgeCases() {
+            console.log('Testing edge cases...');
+            const store = window.useAppStore.getState();
+            
+            await store.openSchematicTab({ component_name: 'Minimal Data' });
+            await store.openSchematicTab({ 
+                component_name: 'Special #123 (Rev. A)',
+                machine_model: 'XYZ-500/A'
+            });
+            await store.openSchematicTab({ 
+                component_name: 'Very Long Component Name That Tests UI Wrapping',
+                machine_model: 'LONGMODEL-12345-ABC-XYZ'
+            });
+            
+            alert('✅ Edge cases tested! Check the tabs.');
+        }
+
+        function inspectState() {
+            const store = window.useAppStore.getState();
+            const schematicTabs = store.tabs.filter(t => t.type === 'schematic');
+            
+            console.log('=== Current State ===');
+            console.log('Total tabs:', store.tabs.length);
+            console.log('Schematic tabs:', schematicTabs.length);
+            console.log('Active tab ID:', store.activeTabId);
+            console.log('Tabs:', store.tabs);
+            
+            alert('State logged to console (F12)');
+        }
+    </script>
+</body>
+</html>
