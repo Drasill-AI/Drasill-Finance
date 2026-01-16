@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { BrowserWindow, ipcMain, app } from 'electron';
+import { BrowserWindow, app } from 'electron';
 import { IPC_CHANNELS, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, IGNORED_PATTERNS } from '@drasill/shared';
 import * as keychain from './keychain';
 
@@ -286,7 +286,7 @@ function sendProgress(window: BrowserWindow, current: number, total: number, fil
  * @param forceReindex - If true, ignore cached embeddings and re-index everything
  */
 export async function indexWorkspace(workspacePath: string, window: BrowserWindow, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }> {
-  console.log(`[RAG] indexWorkspace called. PDF extraction ready: ${pdfExtractionReady}, forceReindex: ${forceReindex}`);
+  console.log(`[RAG] indexWorkspace called. forceReindex: ${forceReindex}`);
   
   if (isIndexing) {
     return { success: false, chunksIndexed: 0, error: 'Indexing already in progress' };

@@ -14,28 +14,25 @@ import {
   PersistedState,
   SchematicToolCall,
   SchematicToolResponse,
+  Deal,
+  DealActivity,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
-import { indexWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, initRAG, setPdfExtractionReady, tryLoadCachedVectorStore } from './rag';
+import { indexWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore } from './rag';
 import { processSchematicToolCall, getSchematicImage } from './schematic';
 import {
   getDatabase,
-  createEquipment,
-  updateEquipment,
-  deleteEquipment,
-  getEquipment,
-  getAllEquipment,
-  createMaintenanceLog,
-  updateMaintenanceLog,
-  deleteMaintenanceLog,
-  getMaintenanceLogsForEquipment,
-  getAllMaintenanceLogs,
-  createFailureEvent,
-  getFailureEventsForEquipment,
-  calculateEquipmentAnalytics,
-  Equipment,
-  MaintenanceLog,
-  FailureEvent,
+  createDeal,
+  updateDeal,
+  deleteDeal,
+  getDeal,
+  getAllDeals,
+  createDealActivity,
+  updateDealActivity,
+  deleteDealActivity,
+  getActivitiesForDeal,
+  getAllActivities,
+  calculatePipelineAnalytics,
 } from './database';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for reading files
@@ -189,10 +186,11 @@ export function setupIpcHandlers(): void {
         title: 'Add Files to Workspace',
         properties: ['openFile', 'multiSelections'],
         filters: [
-          { name: 'Documents', extensions: ['pdf', 'md', 'txt', 'markdown'] },
+          { name: 'Documents', extensions: ['pdf', 'md', 'txt', 'markdown', 'doc', 'docx', 'xls', 'xlsx'] },
           { name: 'PDF Files', extensions: ['pdf'] },
-          { name: 'Markdown Files', extensions: ['md', 'markdown'] },
-          { name: 'Text Files', extensions: ['txt'] },
+          { name: 'Word Files', extensions: ['doc', 'docx'] },
+          { name: 'Excel Files', extensions: ['xls', 'xlsx'] },
+          { name: 'Text Files', extensions: ['txt', 'md', 'markdown'] },
         ],
       });
 
@@ -320,7 +318,7 @@ export function setupIpcHandlers(): void {
   });
 
   // ==========================================
-  // Equipment Management
+  // Deal Management
   // ==========================================
 
   // Initialize database
@@ -334,48 +332,54 @@ export function setupIpcHandlers(): void {
     }
   });
 
-  // Get all equipment
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_GET_ALL, async (): Promise<Equipment[]> => {
-    return getAllEquipment();
+  // Get all deals
+  ipcMain.handle(IPC_CHANNELS.DEAL_GET_ALL, async (): Promise<Deal[]> => {
+    return getAllDeals();
   });
 
-  // Get single equipment
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_GET, async (_event, id: string): Promise<Equipment | null> => {
-    return getEquipment(id);
+  // Get single deal
+  ipcMain.handle(IPC_CHANNELS.DEAL_GET, async (_event, id: string): Promise<Deal | null> => {
+    return getDeal(id);
   });
 
-  // Add equipment
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_ADD, async (_event, equipment: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Equipment> => {
-    return createEquipment(equipment);
+  // Add deal
+  ipcMain.handle(IPC_CHANNELS.DEAL_ADD, async (_event, deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>): Promise<Deal> => {
+    return createDeal(deal);
   });
 
-  // Update equipment
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_UPDATE, async (_event, id: string, equipment: Partial<Equipment>): Promise<Equipment | null> => {
-    return updateEquipment(id, equipment);
+  // Update deal
+  ipcMain.handle(IPC_CHANNELS.DEAL_UPDATE, async (_event, id: string, deal: Partial<Deal>): Promise<Deal | null> => {
+    return updateDeal(id, deal);
   });
 
-  // Delete equipment
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_DELETE, async (_event, id: string): Promise<boolean> => {
-    return deleteEquipment(id);
+  // Delete deal
+  ipcMain.handle(IPC_CHANNELS.DEAL_DELETE, async (_event, id: string): Promise<boolean> => {
+    return deleteDeal(id);
   });
 
-  // Detect equipment from file path - match equipment by make/model patterns in path
-  ipcMain.handle(IPC_CHANNELS.EQUIPMENT_DETECT_FROM_PATH, async (_event, filePath: string): Promise<Equipment | null> => {
-    const allEquipment = getAllEquipment();
+  // Detect deal from file path - match deal by borrower name patterns in path
+  ipcMain.handle(IPC_CHANNELS.DEAL_DETECT_FROM_PATH, async (_event, filePath: string): Promise<Deal | null> => {
+    const allDeals = getAllDeals();
     const pathLower = filePath.toLowerCase();
     
-    // Try to find equipment where make or model appears in the file path
-    for (const eq of allEquipment) {
-      const makeLower = eq.make.toLowerCase();
-      const modelLower = eq.model.toLowerCase();
+    // Try to find deal where borrower name appears in the file path
+    for (const deal of allDeals) {
+      const borrowerLower = deal.borrowerName.toLowerCase();
       
-      if (pathLower.includes(makeLower) || pathLower.includes(modelLower)) {
-        return eq;
+      // Check if borrower name (or parts of it) appear in path
+      if (pathLower.includes(borrowerLower)) {
+        return deal;
       }
       
-      // Also check manual path match
-      if (eq.manualPath && filePath.startsWith(eq.manualPath)) {
-        return eq;
+      // Try matching first word of borrower name
+      const firstWord = borrowerLower.split(/\s+/)[0];
+      if (firstWord.length > 3 && pathLower.includes(firstWord)) {
+        return deal;
+      }
+      
+      // Also check document path match if stored
+      if (deal.documentPath && filePath.startsWith(deal.documentPath)) {
+        return deal;
       }
     }
     
@@ -383,70 +387,39 @@ export function setupIpcHandlers(): void {
   });
 
   // ==========================================
-  // Maintenance Logs
+  // Deal Activities
   // ==========================================
 
-  // Add maintenance log
-  ipcMain.handle(IPC_CHANNELS.LOGS_ADD, async (_event, log: Omit<MaintenanceLog, 'id' | 'createdAt'>): Promise<MaintenanceLog> => {
-    return createMaintenanceLog(log);
+  // Add deal activity
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_ADD, async (_event, activity: Omit<DealActivity, 'id' | 'createdAt'>): Promise<DealActivity> => {
+    return createDealActivity(activity);
   });
 
-  // Get all maintenance logs
-  ipcMain.handle(IPC_CHANNELS.LOGS_GET, async (_event, _limit?: number): Promise<MaintenanceLog[]> => {
-    return getAllMaintenanceLogs();
-  });
-
-  // Get maintenance logs for specific equipment
-  ipcMain.handle(IPC_CHANNELS.LOGS_GET_BY_EQUIPMENT, async (_event, equipmentId: string, _limit?: number): Promise<MaintenanceLog[]> => {
-    return getMaintenanceLogsForEquipment(equipmentId);
-  });
-
-  // Update maintenance log
-  ipcMain.handle(IPC_CHANNELS.LOGS_UPDATE, async (_event, id: string, data: Partial<Omit<MaintenanceLog, 'id' | 'createdAt'>>): Promise<MaintenanceLog | null> => {
-    return updateMaintenanceLog(id, data);
-  });
-
-  // Delete maintenance log
-  ipcMain.handle(IPC_CHANNELS.LOGS_DELETE, async (_event, id: string): Promise<boolean> => {
-    return deleteMaintenanceLog(id);
-  });
-
-  // ==========================================
-  // Failure Events
-  // ==========================================
-
-  // Add failure event
-  ipcMain.handle(IPC_CHANNELS.FAILURE_ADD, async (_event, event: Omit<FailureEvent, 'id' | 'createdAt'>): Promise<FailureEvent> => {
-    return createFailureEvent(event);
-  });
-
-  // Get failure events
-  ipcMain.handle(IPC_CHANNELS.FAILURE_GET, async (_event, equipmentId?: string, _limit?: number): Promise<FailureEvent[]> => {
-    if (equipmentId) {
-      return getFailureEventsForEquipment(equipmentId);
+  // Get deal activities
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_GET, async (_event, dealId?: string, _limit?: number): Promise<DealActivity[]> => {
+    if (dealId) {
+      return getActivitiesForDeal(dealId);
     }
-    // For all equipment, aggregate
-    const allEquipment = getAllEquipment();
-    const allFailures: FailureEvent[] = [];
-    for (const eq of allEquipment) {
-      const failures = getFailureEventsForEquipment(eq.id);
-      allFailures.push(...failures);
-    }
-    return allFailures.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+    return getAllActivities();
+  });
+
+  // Update deal activity
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_UPDATE, async (_event, id: string, data: Partial<Omit<DealActivity, 'id' | 'createdAt'>>): Promise<DealActivity | null> => {
+    return updateDealActivity(id, data);
+  });
+
+  // Delete deal activity
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_DELETE, async (_event, id: string): Promise<boolean> => {
+    return deleteDealActivity(id);
   });
 
   // ==========================================
-  // Analytics
+  // Pipeline Analytics
   // ==========================================
 
-  // Get equipment analytics
-  ipcMain.handle(IPC_CHANNELS.ANALYTICS_GET, async (_event, equipmentId?: string): Promise<ReturnType<typeof calculateEquipmentAnalytics>[]> => {
-    if (equipmentId) {
-      return [calculateEquipmentAnalytics(equipmentId)];
-    }
-    // Get analytics for all equipment
-    const allEquipment = getAllEquipment();
-    return allEquipment.map(eq => calculateEquipmentAnalytics(eq.id));
+  // Get pipeline analytics
+  ipcMain.handle(IPC_CHANNELS.PIPELINE_GET, async (): Promise<ReturnType<typeof calculatePipelineAnalytics>> => {
+    return calculatePipelineAnalytics();
   });
 
   // ==========================================

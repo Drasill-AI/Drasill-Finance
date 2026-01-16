@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron';
 import { ChatRequest, IPC_CHANNELS, FileContext } from '@drasill/shared';
 import { getRAGContext, getIndexingStatus } from './rag';
 import * as keychain from './keychain';
-import { CHAT_TOOLS, executeTool, buildEquipmentContext } from './chatTools';
+import { CHAT_TOOLS, executeTool, buildDealContext } from './chatTools';
 
 let openai: OpenAI | null = null;
 let abortController: AbortController | null = null;
@@ -59,23 +59,23 @@ interface RAGSource {
  * Returns both the prompt and any RAG sources for citation
  */
 async function buildSystemPrompt(context?: FileContext, userQuery?: string): Promise<{ prompt: string; ragSources: RAGSource[] }> {
-  let systemPrompt = `You are Lonnie, an AI assistant for Drasill Cloud - an equipment documentation and maintenance management system.
+  let systemPrompt = `You are an AI assistant for Drasill - a lending deal flow management and underwriting system.
 
 Your capabilities:
-- Explain technical concepts in documentation
-- Summarize long documents
-- Answer questions about equipment specifications
-- Help find specific information in documents
-- Create maintenance logs and update equipment status via function calls
-- Provide analytics on equipment performance (MTBF, MTTR, availability)
+- Analyze loan documents and underwriting materials
+- Summarize deal information and documentation
+- Answer questions about deals, borrowers, and lending terms
+- Help find specific information in indexed documents
+- Manage deals through the pipeline via function calls (add activities, update stages)
+- Provide pipeline analytics and deal tracking
 
-When users want to create logs or update equipment, use the available tools. For status updates, always ask for confirmation first by calling the tool with confirmed=false.
+When users want to add activities or update deal stages, use the available tools. For stage changes, always ask for confirmation first by calling the tool with confirmed=false.
 
-Be concise, accurate, and helpful. When referencing information from provided context, cite specific sources or file names. Summarize actions you take.`;
+Be concise, accurate, and helpful. When referencing information from provided context, cite specific sources or file names using [[1]], [[2]] format. Summarize actions you take.`;
 
-  // Add equipment context
-  const equipmentContext = buildEquipmentContext();
-  systemPrompt += `\n\n--- EQUIPMENT DATABASE ---\n${equipmentContext}\n--- END EQUIPMENT DATABASE ---`;
+  // Add deal pipeline context
+  const dealContext = buildDealContext();
+  systemPrompt += `\n\n--- DEAL PIPELINE ---\n${dealContext}\n--- END DEAL PIPELINE ---`;
 
   // Add RAG context if available
   const ragStatus = getIndexingStatus();

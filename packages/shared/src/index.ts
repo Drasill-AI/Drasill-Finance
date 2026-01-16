@@ -121,24 +121,21 @@ export const IPC_CHANNELS = {
   // State persistence
   STATE_SAVE: 'state-save',
   STATE_LOAD: 'state-load',
-  // Equipment Management
-  EQUIPMENT_GET_ALL: 'equipment-get-all',
-  EQUIPMENT_GET: 'equipment-get',
-  EQUIPMENT_ADD: 'equipment-add',
-  EQUIPMENT_UPDATE: 'equipment-update',
-  EQUIPMENT_DELETE: 'equipment-delete',
-  EQUIPMENT_DETECT_FROM_PATH: 'equipment-detect-from-path',
-  // Maintenance Logs
-  LOGS_ADD: 'logs-add',
-  LOGS_GET: 'logs-get',
-  LOGS_GET_BY_EQUIPMENT: 'logs-get-by-equipment',
-  LOGS_UPDATE: 'logs-update',
-  LOGS_DELETE: 'logs-delete',
-  // Failure Events
-  FAILURE_ADD: 'failure-add',
-  FAILURE_GET: 'failure-get',
-  // Analytics
-  ANALYTICS_GET: 'analytics-get',
+  // Deal Management
+  DEAL_GET_ALL: 'deal-get-all',
+  DEAL_GET: 'deal-get',
+  DEAL_ADD: 'deal-add',
+  DEAL_UPDATE: 'deal-update',
+  DEAL_DELETE: 'deal-delete',
+  DEAL_DETECT_FROM_PATH: 'deal-detect-from-path',
+  // Deal Activities
+  ACTIVITY_ADD: 'activity-add',
+  ACTIVITY_GET: 'activity-get',
+  ACTIVITY_GET_BY_DEAL: 'activity-get-by-deal',
+  ACTIVITY_UPDATE: 'activity-update',
+  ACTIVITY_DELETE: 'activity-delete',
+  // Pipeline Analytics
+  PIPELINE_GET: 'pipeline-get',
   // Database
   DB_INIT: 'db-init',
   // File Operations
@@ -352,95 +349,80 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 }
 
 // ==========================================
-// Equipment & Maintenance Log Types
+// Deal & Activity Types (Lending Deal Management)
 // ==========================================
 
 /**
- * Equipment record
+ * Deal stages - fixed workflow
  */
-export interface Equipment {
+export type DealStage = 'lead' | 'application' | 'underwriting' | 'approved' | 'funded' | 'closed' | 'declined';
+
+/**
+ * Deal priority levels
+ */
+export type DealPriority = 'low' | 'medium' | 'high';
+
+/**
+ * Deal record for lending/underwriting
+ */
+export interface Deal {
   id?: string;
-  name: string;
-  make: string;
-  model: string;
-  serialNumber?: string | null;
-  installDate?: string | null;
-  location?: string | null;
-  status?: 'operational' | 'maintenance' | 'down' | 'retired';
-  hourlyCost?: number;
-  manualPath?: string | null;
-  notes?: string;
+  dealNumber: string;
+  borrowerName: string;
+  borrowerContact?: string | null;
+  loanAmount: number;
+  interestRate?: number | null;
+  termMonths?: number | null;
+  collateralDescription?: string | null;
+  stage: DealStage;
+  priority?: DealPriority;
+  assignedTo?: string | null;
+  documentPath?: string | null;
+  notes?: string | null;
+  expectedCloseDate?: string | null;
+  actualCloseDate?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
 /**
- * Maintenance log entry
+ * Deal activity types
  */
-export interface MaintenanceLog {
+export type DealActivityType = 'note' | 'call' | 'email' | 'document' | 'stage_change' | 'meeting';
+
+/**
+ * Deal activity record
+ */
+export interface DealActivity {
   id?: string;
-  equipmentId: string;
-  type: 'preventive' | 'corrective' | 'emergency' | 'inspection';
-  startedAt: string;
-  completedAt?: string | null;
-  durationMinutes?: number | null;
-  technician?: string | null;
-  partsUsed?: string | null;
-  notes?: string | null;
+  dealId: string;
+  type: DealActivityType;
+  description: string;
+  performedBy?: string | null;
+  performedAt: string;
+  metadata?: string | null; // JSON for flexible data
   createdAt?: string;
 }
 
 /**
- * Failure event record
+ * Pipeline analytics data
  */
-export interface FailureEvent {
-  id?: string;
-  equipmentId: string;
-  occurredAt: string;
-  resolvedAt?: string | null;
-  rootCause?: string | null;
-  maintenanceLogId?: string | null;
-  createdAt?: string;
+export interface PipelineAnalytics {
+  totalDeals: number;
+  totalPipelineValue: number;
+  averageDealSize: number;
+  byStage: Record<DealStage, { count: number; totalValue: number }>;
 }
 
 /**
- * Equipment analytics data
+ * Activity form data
  */
-export interface EquipmentAnalytics {
-  equipmentId: string;
-  mtbf: number | null; // Mean Time Between Failures (hours)
-  mttr: number | null; // Mean Time To Repair (hours)
-  availability: number | null; // Percentage (0-100)
-  totalFailures: number;
-  totalMaintenanceLogs: number;
-  lastMaintenanceDate: string | null;
-  lastMaintenanceType: string | null;
-  predictedNextMaintenance: string | null;
-  healthScore?: number; // 0-100 (computed on frontend)
-}
-
-/**
- * Log entry form data
- */
-export interface LogEntryFormData {
-  equipmentId: string;
-  type: MaintenanceLog['type'];
-  startedAt: string;
-  completedAt?: string | null;
-  durationMinutes?: number | null;
-  technician?: string | null;
-  partsUsed?: string | null;
-  notes?: string | null;
-}
-
-/**
- * Failure event form data
- */
-export interface FailureFormData {
-  equipmentId: string;
-  occurredAt: string;
-  resolvedAt?: string | null;
-  rootCause?: string | null;
+export interface ActivityFormData {
+  dealId: string;
+  type: DealActivityType;
+  description: string;
+  performedBy?: string | null;
+  performedAt: string;
 }
 
 /**
@@ -449,7 +431,7 @@ export interface FailureFormData {
 export interface BottomPanelState {
   isOpen: boolean;
   height: number;
-  activeTab: 'logs' | 'analytics';
+  activeTab: 'activities' | 'pipeline';
 }
 
 // ==========================================

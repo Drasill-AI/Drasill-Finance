@@ -5,8 +5,8 @@ import { EditorPane } from './EditorPane';
 import { RightPanel } from './RightPanel';
 import { TopBar } from './TopBar';
 import { BottomPanel } from './BottomPanel';
-import { LogEntryModal } from './LogEntryModal';
-import { EquipmentModal } from './EquipmentModal';
+import { DealModal } from './DealModal';
+import { ActivityModal } from './ActivityModal';
 import { useAppStore } from '../store';
 import styles from './Layout.module.css';
 
@@ -21,18 +21,18 @@ export function Layout() {
     toggleBottomPanel,
     activeTabId,
     tabs,
-    detectEquipmentFromFile,
+    detectDealFromFile,
   } = useAppStore();
 
-  // Detect equipment when active tab changes
+  // Detect deal when active tab changes
   useEffect(() => {
     if (activeTabId) {
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab) {
-        detectEquipmentFromFile(activeTab.path);
+        detectDealFromFile(activeTab.path);
       }
     }
-  }, [activeTabId, tabs, detectEquipmentFromFile]);
+  }, [activeTabId, tabs, detectDealFromFile]);
 
   const handleLeftDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -129,8 +129,8 @@ export function Layout() {
       </aside>
 
       {/* Modals */}
-      <LogEntryModal />
-      <EquipmentModal />
+      <DealModal />
+      <ActivityModal />
     </div>
   );
 }

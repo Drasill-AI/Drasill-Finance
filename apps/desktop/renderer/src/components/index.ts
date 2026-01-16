@@ -9,6 +9,6 @@ export { CommandPalette } from './CommandPalette';
 export { Toast } from './Toast';
 export { TopBar } from './TopBar';
 export { BottomPanel } from './BottomPanel';
-export { LogEntryModal } from './LogEntryModal';
-export { EquipmentModal } from './EquipmentModal';
+export { DealModal } from './DealModal';
+export { ActivityModal } from './ActivityModal';
 export { SchematicViewer } from './SchematicViewer';

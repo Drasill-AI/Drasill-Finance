@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Equipment, BottomPanelState, MaintenanceLog, SchematicToolCall, SchematicData } from '@drasill/shared';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Deal, DealActivity, BottomPanelState, SchematicToolCall, SchematicData } from '@drasill/shared';
 
 interface ToastMessage {
   id: string;
@@ -39,14 +39,14 @@ interface AppState {
   // Tab view states (for Monaco)
   tabViewStates: Map<string, unknown>;
 
-  // Equipment & Logs
-  equipment: Equipment[];
-  selectedEquipmentId: string | null;
-  detectedEquipment: Equipment | null;
-  isLogModalOpen: boolean;
-  isEquipmentModalOpen: boolean;
-  logsRefreshTrigger: number;
-  editingLog: MaintenanceLog | null;
+  // Deals & Activities
+  deals: Deal[];
+  selectedDealId: string | null;
+  detectedDeal: Deal | null;
+  isActivityModalOpen: boolean;
+  isDealModalOpen: boolean;
+  activitiesRefreshTrigger: number;
+  editingActivity: DealActivity | null;
 
   // Bottom Panel
   bottomPanelState: BottomPanelState;
@@ -88,14 +88,14 @@ interface AppState {
   loadPersistedState: () => Promise<void>;
   restoreWorkspace: (path: string) => Promise<void>;
 
-  // Equipment actions
-  loadEquipment: () => Promise<void>;
-  setSelectedEquipment: (id: string | null) => void;
-  detectEquipmentFromFile: (path: string) => Promise<void>;
-  setLogModalOpen: (open: boolean) => void;
-  setEquipmentModalOpen: (open: boolean) => void;
-  setEditingLog: (log: MaintenanceLog | null) => void;
-  refreshLogs: () => void;
+  // Deal actions
+  loadDeals: () => Promise<void>;
+  setSelectedDeal: (id: string | null) => void;
+  detectDealFromFile: (path: string) => Promise<void>;
+  setActivityModalOpen: (open: boolean) => void;
+  setDealModalOpen: (open: boolean) => void;
+  setEditingActivity: (activity: DealActivity | null) => void;
+  refreshActivities: () => void;
 
   // Bottom panel actions
   setBottomPanelOpen: (open: boolean) => void;
@@ -130,20 +130,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   indexingProgress: null,
   ragChunksCount: 0,
 
-  // Equipment & Logs state
-  equipment: [],
-  selectedEquipmentId: null,
-  detectedEquipment: null,
-  isLogModalOpen: false,
-  isEquipmentModalOpen: false,
-  logsRefreshTrigger: 0,
-  editingLog: null,
+  // Deals & Activities state
+  deals: [],
+  selectedDealId: null,
+  detectedDeal: null,
+  isActivityModalOpen: false,
+  isDealModalOpen: false,
+  activitiesRefreshTrigger: 0,
+  editingActivity: null,
 
   // Bottom panel state
   bottomPanelState: {
     isOpen: false,
     height: 200,
-    activeTab: 'logs',
+    activeTab: 'activities',
   },
 
   // Actions
@@ -683,78 +683,57 @@ export const useAppStore = create<AppState>((set, get) => ({
         }],
       });
       
-      // Load all workspace folders
-      const newTree: TreeNode[] = [];
-      for (const folderPath of paths) {
-        try {
-          const children = await get().loadDirectory(folderPath);
-          newTree.push({
-            id: folderPath,
-            name: folderPath.split(/[\\/]/).pop() || folderPath,
-            path: folderPath,
-            isDirectory: true,
-            isExpanded: true,
-            children,
-          });
-        } catch (err) {
-          console.warn(`Failed to load workspace folder: ${folderPath}`, err);
-        }
-      }
-      set({ tree: newTree });
-      
-      // Try to load cached RAG embeddings for the primary workspace
-      if (paths[0]) {
-        const loaded = await get().loadRagCache(paths[0]);
-        if (loaded) {
-          console.log('[Store] Successfully loaded cached RAG embeddings');
-        }
+      // Try to load cached RAG embeddings for the workspace
+      const loaded = await get().loadRagCache(workspacePath);
+      if (loaded) {
+        console.log('[Store] Successfully loaded cached RAG embeddings');
       }
     } catch (error) {
       get().showToast('error', `Failed to restore workspace: ${error}`);
     }
   },
 
-  // Equipment actions
-  loadEquipment: async () => {
+  // Deal actions
+  loadDeals: async () => {
     try {
-      const equipmentList = await window.electronAPI.getAllEquipment();
-      set({ equipment: equipmentList });
+      const dealsList = await window.electronAPI.getAllDeals();
+      set({ deals: dealsList });
     } catch (error) {
-      get().showToast('error', 'Failed to load equipment');
+      get().showToast('error', 'Failed to load deals');
     }
   },
 
-  setSelectedEquipment: (id: string | null) => {
-    set({ selectedEquipmentId: id });
+  setSelectedDeal: (id: string | null) => {
+    set({ selectedDealId: id });
   },
 
-  detectEquipmentFromFile: async (path: string) => {
+  detectDealFromFile: async (path: string) => {
     try {
-      const detected = await window.electronAPI.detectEquipmentFromPath(path);
-      set({ detectedEquipment: detected });
-      // Auto-select if no equipment currently selected
-      if (detected && !get().selectedEquipmentId) {
-        set({ selectedEquipmentId: detected.id ?? null });
+      const detected = await window.electronAPI.detectDealFromPath(path);
+      set({ detectedDeal: detected });
+      // Auto-select if no deal currently selected
+      if (detected && !get().selectedDealId) {
+        set({ selectedDealId: detected.id ?? null });
       }
     } catch {
       // Silently fail - detection is optional
     }
   },
 
-  setLogModalOpen: (open: boolean) => {
-    set({ isLogModalOpen: open });
+  setActivityModalOpen: (open: boolean) => {
+    set({ isActivityModalOpen: open });
   },
 
-  setEditingLog: (log: MaintenanceLog | null) => {
-    set({ editingLog: log });
+  setEditingActivity: (activity: DealActivity | null) => {
+    set({ editingActivity: activity });
   },
 
-  setEquipmentModalOpen: (open: boolean) => {
-    set({ isEquipmentModalOpen: open });
+  setDealModalOpen: (open: boolean) => {
+    set({ isDealModalOpen: open });
   },
 
-  refreshLogs: () => {
-    set((state) => ({ logsRefreshTrigger: state.logsRefreshTrigger + 1 }));
+  refreshActivities: () => {
+    set((state) => ({ activitiesRefreshTrigger: state.activitiesRefreshTrigger + 1 }));
   },
 
   // Bottom panel actions
@@ -841,20 +820,20 @@ useAppStore.getState().checkApiKey();
 useAppStore.getState().checkRagStatus();
 useAppStore.getState().loadPersistedState();
 
-// Initialize database and load equipment
+// Initialize database and load deals
 window.electronAPI.initDatabase().then(() => {
-  useAppStore.getState().loadEquipment();
+  useAppStore.getState().loadDeals();
 });
 
 // Listen for chat tool executions to refresh data
 window.electronAPI.onChatToolExecuted((data) => {
   console.log('Chat tool executed:', data.action);
   
-  if (data.action === 'maintenance_log_created' || data.action === 'failure_event_recorded') {
-    useAppStore.getState().refreshLogs();
+  if (data.action === 'deal_activity_created' || data.action === 'deal_stage_updated') {
+    useAppStore.getState().refreshActivities();
   }
   
-  if (data.action === 'equipment_status_updated') {
-    useAppStore.getState().loadEquipment();
+  if (data.action === 'deal_created' || data.action === 'deal_updated') {
+    useAppStore.getState().loadDeals();
   }
 });

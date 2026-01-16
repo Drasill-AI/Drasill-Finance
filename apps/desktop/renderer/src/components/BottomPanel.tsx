@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAppStore } from '../store';
-import { MaintenanceLog, EquipmentAnalytics } from '@drasill/shared';
+import { DealActivity, PipelineAnalytics } from '@drasill/shared';
 import styles from './BottomPanel.module.css';
 
 interface BottomPanelProps {
@@ -10,34 +10,40 @@ interface BottomPanelProps {
   onToggle: () => void;
 }
 
+const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  note: 'Note',
+  call: 'Call',
+  email: 'Email',
+  document: 'Document',
+  meeting: 'Meeting',
+};
+
 export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: BottomPanelProps) {
-  const [activeTab, setActiveTab] = useState<'logs' | 'analytics'>('logs');
-  const [selectedEquipmentId, setSelectedEquipmentId] = useState<string | 'all'>('all');
-  const [logs, setLogs] = useState<MaintenanceLog[]>([]);
-  const [analytics, setAnalytics] = useState<EquipmentAnalytics[]>([]);
+  const [activeTab, setActiveTab] = useState<'activities' | 'pipeline'>('activities');
+  const [selectedDealId, setSelectedDealId] = useState<string | 'all'>('all');
+  const [activities, setActivities] = useState<DealActivity[]>([]);
+  const [analytics, setAnalytics] = useState<PipelineAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  const { equipment, showToast, setLogModalOpen, setEditingLog, logsRefreshTrigger } = useAppStore();
+  const { deals, showToast, setActivityModalOpen, setEditingActivity, activitiesRefreshTrigger } = useAppStore();
 
-  // Load data when panel opens or equipment selection changes
+  // Load data when panel opens or deal selection changes
   useEffect(() => {
     if (isOpen) {
       loadData();
     }
-  }, [isOpen, selectedEquipmentId, activeTab, logsRefreshTrigger]);
+  }, [isOpen, selectedDealId, activeTab, activitiesRefreshTrigger]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      if (activeTab === 'logs') {
-        const logsData = selectedEquipmentId === 'all'
-          ? await window.electronAPI.getMaintenanceLogs(100)
-          : await window.electronAPI.getMaintenanceLogsByEquipment(selectedEquipmentId, 100);
-        setLogs(logsData);
+      if (activeTab === 'activities') {
+        const activitiesData = selectedDealId === 'all'
+          ? await window.electronAPI.getDealActivities(undefined, 100)
+          : await window.electronAPI.getDealActivities(selectedDealId, 100);
+        setActivities(activitiesData);
       } else {
-        const analyticsData = selectedEquipmentId === 'all'
-          ? await window.electronAPI.getEquipmentAnalytics()
-          : await window.electronAPI.getEquipmentAnalytics(selectedEquipmentId);
+        const analyticsData = await window.electronAPI.getPipelineAnalytics();
         setAnalytics(analyticsData);
       }
     } catch (error) {
@@ -79,32 +85,41 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
     });
   };
 
-  const getEquipmentName = (equipmentId: string) => {
-    const eq = equipment.find(e => e.id === equipmentId);
-    return eq ? `${eq.make} ${eq.model}` : `Equipment #${equipmentId}`;
+  const formatDateTime = (dateStr: string) => {
+    return new Date(dateStr).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   };
 
-  const getHealthClass = (score: number | undefined) => {
-    if (!score) return styles.good;
-    if (score >= 80) return styles.good;
-    if (score >= 50) return styles.warning;
-    return styles.critical;
+  const getDealName = (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    return deal ? deal.borrowerName : `Deal #${dealId}`;
   };
 
-  // Calculate health score from analytics data
-  const getHealthScore = (item: EquipmentAnalytics): number => {
-    if (item.availability !== null) {
-      return Math.round(item.availability);
-    }
-    // Default score based on failure count
-    return Math.max(0, 100 - item.totalFailures * 10);
+  const formatCurrency = (amount: number | null | undefined) => {
+    if (amount === null || amount === undefined) return '$0';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
   };
 
-  const formatHours = (hours: number | null) => {
-    if (hours === null) return 'N/A';
-    if (hours < 1) return `${Math.round(hours * 60)}m`;
-    if (hours < 24) return `${hours.toFixed(1)}h`;
-    return `${Math.round(hours / 24)}d`;
+  const getStageColor = (stage: string): string => {
+    const colors: Record<string, string> = {
+      lead: '#6b7280',
+      application: '#3b82f6',
+      underwriting: '#f59e0b',
+      approved: '#10b981',
+      funded: '#8b5cf6',
+      closed: '#6b7280',
+      declined: '#ef4444',
+    };
+    return colors[stage] || '#6b7280';
   };
 
   return (
@@ -124,8 +139,8 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
       <div className={styles.header}>
         <div className={styles.tabs}>
           <button 
-            className={`${styles.tab} ${activeTab === 'logs' ? styles.active : ''}`}
-            onClick={() => setActiveTab('logs')}
+            className={`${styles.tab} ${activeTab === 'activities' ? styles.active : ''}`}
+            onClick={() => setActiveTab('activities')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -134,18 +149,18 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
               <line x1="16" y1="17" x2="8" y2="17" />
               <polyline points="10 9 9 9 8 9" />
             </svg>
-            Logs
+            Activities
           </button>
           <button 
-            className={`${styles.tab} ${activeTab === 'analytics' ? styles.active : ''}`}
-            onClick={() => setActiveTab('analytics')}
+            className={`${styles.tab} ${activeTab === 'pipeline' ? styles.active : ''}`}
+            onClick={() => setActiveTab('pipeline')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="20" x2="18" y2="10" />
               <line x1="12" y1="20" x2="12" y2="4" />
               <line x1="6" y1="20" x2="6" y2="14" />
             </svg>
-            Analytics
+            Pipeline
           </button>
         </div>
 
@@ -179,64 +194,66 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
       {/* Content */}
       {isOpen && (
         <div className={styles.content}>
-          {activeTab === 'logs' ? (
+          {activeTab === 'activities' ? (
             <div className={styles.logsView}>
               <div className={styles.logsToolbar}>
                 <select 
                   className={styles.equipmentSelect}
-                  value={selectedEquipmentId}
-                  onChange={(e) => setSelectedEquipmentId(e.target.value === 'all' ? 'all' : e.target.value)}
+                  value={selectedDealId}
+                  onChange={(e) => setSelectedDealId(e.target.value === 'all' ? 'all' : e.target.value)}
                 >
-                  <option value="all">All Equipment</option>
-                  {equipment.map(eq => (
-                    <option key={eq.id} value={eq.id}>
-                      {eq.make} {eq.model} {eq.serialNumber ? `(${eq.serialNumber})` : ''}
+                  <option value="all">All Deals</option>
+                  {deals.map(deal => (
+                    <option key={deal.id} value={deal.id}>
+                      {deal.borrowerName} - {formatCurrency(deal.loanAmount)}
                     </option>
                   ))}
                 </select>
                 <button 
                   className={styles.addButton}
-                  onClick={() => setLogModalOpen(true)}
+                  onClick={() => setActivityModalOpen(true)}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="12" y1="5" x2="12" y2="19" />
                     <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
-                  Add Log Entry
+                  Add Activity
                 </button>
               </div>
 
               <div className={styles.logsList}>
                 {isLoading ? (
                   <div className={styles.emptyState}>
-                    <p>Loading logs...</p>
+                    <p>Loading activities...</p>
                   </div>
-                ) : logs.length === 0 ? (
+                ) : activities.length === 0 ? (
                   <div className={styles.emptyState}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <polyline points="14 2 14 8 20 8" />
                     </svg>
-                    <p>No maintenance logs yet</p>
-                    <p>Click "Add Log Entry" to record maintenance activities</p>
+                    <p>No activities yet</p>
+                    <p>Click "Add Activity" to log deal activities</p>
                   </div>
                 ) : (
-                  logs.map(log => (
+                  activities.map(activity => (
                     <div 
-                      key={log.id} 
+                      key={activity.id} 
                       className={styles.logEntry}
                       onClick={() => {
-                        setEditingLog(log);
-                        setLogModalOpen(true);
+                        setEditingActivity(activity);
+                        setActivityModalOpen(true);
                       }}
                       style={{ cursor: 'pointer' }}
                       title="Click to edit"
                     >
-                      <span className={styles.logDate}>{formatDate(log.startedAt)}</span>
-                      <span className={`${styles.logType} ${styles[log.type]}`}>{log.type}</span>
-                      <span className={styles.logDescription}>{log.notes || 'No notes'}</span>
-                      <span className={styles.logPerformedBy}>{log.technician || 'Unknown'}</span>
-                      <span className={styles.logEquipment}>{getEquipmentName(log.equipmentId)}</span>
+                      <span className={styles.logDate}>{formatDateTime(activity.performedAt)}</span>
+                      <span className={`${styles.logType} ${styles[activity.type]}`}>
+                        {ACTIVITY_TYPE_LABELS[activity.type] || activity.type}
+                      </span>
+                      <span className={styles.logDescription}>{activity.description || 'No description'}</span>
+                      <span className={styles.logPerformedBy}>{activity.performedBy || '-'}</span>
+                      <span className={styles.logEquipment}>{getDealName(activity.dealId)}</span>
                     </div>
                   ))
                 )}
@@ -244,85 +261,89 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
             </div>
           ) : (
             <div className={styles.analyticsView}>
-              <div className={styles.analyticsToolbar}>
-                <select 
-                  className={styles.equipmentSelect}
-                  value={selectedEquipmentId}
-                  onChange={(e) => setSelectedEquipmentId(e.target.value === 'all' ? 'all' : e.target.value)}
-                >
-                  <option value="all">All Equipment</option>
-                  {equipment.map(eq => (
-                    <option key={eq.id} value={eq.id}>
-                      {eq.make} {eq.model}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <div className={styles.analyticsGrid}>
                 {isLoading ? (
                   <div className={styles.emptyState}>
-                    <p>Loading analytics...</p>
+                    <p>Loading pipeline...</p>
                   </div>
-                ) : analytics.length === 0 ? (
+                ) : !analytics ? (
                   <div className={styles.emptyState}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <line x1="18" y1="20" x2="18" y2="10" />
                       <line x1="12" y1="20" x2="12" y2="4" />
                       <line x1="6" y1="20" x2="6" y2="14" />
                     </svg>
-                    <p>No analytics data available</p>
-                    <p>Add equipment and maintenance logs to see metrics</p>
+                    <p>No pipeline data available</p>
+                    <p>Add deals to see pipeline metrics</p>
                   </div>
                 ) : (
-                  analytics.map(item => {
-                    const healthScore = getHealthScore(item);
-                    const equipmentName = getEquipmentName(item.equipmentId);
-                    return (
-                    <div key={item.equipmentId} className={styles.metricCard}>
+                  <>
+                    {/* Summary Cards */}
+                    <div className={styles.metricCard}>
                       <div className={styles.metricHeader}>
-                        <span className={styles.metricName}>{equipmentName}</span>
-                        <span className={`${styles.healthBadge} ${getHealthClass(healthScore)}`}>
-                          {healthScore}% Health
+                        <span className={styles.metricName}>Total Pipeline</span>
+                        <span className={`${styles.healthBadge} ${styles.good}`}>
+                          {analytics.totalDeals} deals
                         </span>
                       </div>
                       <div className={styles.metricValues}>
                         <div className={styles.metricItem}>
-                          <span className={styles.metricLabel}>MTBF</span>
-                          <span className={styles.metricValue}>
-                            {formatHours(item.mtbf)}
-                            {item.mtbf && <span className={styles.metricUnit}>hrs</span>}
-                          </span>
-                        </div>
-                        <div className={styles.metricItem}>
-                          <span className={styles.metricLabel}>MTTR</span>
-                          <span className={styles.metricValue}>
-                            {formatHours(item.mttr)}
-                            {item.mttr && <span className={styles.metricUnit}>hrs</span>}
-                          </span>
-                        </div>
-                        <div className={styles.metricItem}>
-                          <span className={styles.metricLabel}>Availability</span>
+                          <span className={styles.metricLabel}>Total Value</span>
                           <span className={`${styles.metricValue} ${styles.accent}`}>
-                            {item.availability?.toFixed(1) ?? 'N/A'}
-                            {item.availability !== null && <span className={styles.metricUnit}>%</span>}
+                            {formatCurrency(analytics.totalPipelineValue)}
                           </span>
                         </div>
                         <div className={styles.metricItem}>
-                          <span className={styles.metricLabel}>Failures</span>
-                          <span className={styles.metricValue}>{item.totalFailures}</span>
+                          <span className={styles.metricLabel}>Avg Deal Size</span>
+                          <span className={styles.metricValue}>
+                            {formatCurrency(analytics.averageDealSize)}
+                          </span>
                         </div>
                       </div>
-                      {item.predictedNextMaintenance && (
-                        <div className={styles.prediction}>
-                          <span className={styles.predictionLabel}>Next Maintenance: </span>
-                          <span className={styles.predictionValue}>
-                            {formatDate(item.predictedNextMaintenance)}
-                          </span>
-                        </div>
-                      )}
                     </div>
-                  );})
+
+                    {/* Stage Breakdown */}
+                    {analytics.dealsByStage && Object.keys(analytics.dealsByStage).length > 0 && (
+                      <div className={styles.metricCard}>
+                        <div className={styles.metricHeader}>
+                          <span className={styles.metricName}>Deals by Stage</span>
+                        </div>
+                        <div className={styles.stageBreakdown}>
+                          {Object.entries(analytics.dealsByStage).map(([stage, count]) => (
+                            <div key={stage} className={styles.stageItem}>
+                              <span 
+                                className={styles.stageDot}
+                                style={{ backgroundColor: getStageColor(stage) }}
+                              />
+                              <span className={styles.stageName}>{stage}</span>
+                              <span className={styles.stageCount}>{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Value by Stage */}
+                    {analytics.valueByStage && Object.keys(analytics.valueByStage).length > 0 && (
+                      <div className={styles.metricCard}>
+                        <div className={styles.metricHeader}>
+                          <span className={styles.metricName}>Value by Stage</span>
+                        </div>
+                        <div className={styles.stageBreakdown}>
+                          {Object.entries(analytics.valueByStage).map(([stage, value]) => (
+                            <div key={stage} className={styles.stageItem}>
+                              <span 
+                                className={styles.stageDot}
+                                style={{ backgroundColor: getStageColor(stage) }}
+                              />
+                              <span className={styles.stageName}>{stage}</span>
+                              <span className={styles.stageValue}>{formatCurrency(value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

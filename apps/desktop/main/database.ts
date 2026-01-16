@@ -1,481 +1,36 @@
 /**
- * SQLite database module for equipment and maintenance logs
- * Uses better-sqlite3 for synchronous, high-performance SQLite access
+ * Database module for Deal Management
+ * Uses better-sqlite3 for synchronous SQLite access
  */
+
 import Database from 'better-sqlite3';
+import path from 'path';
 import { app } from 'electron';
-import * as path from 'path';
-import * as fs from 'fs';
-
-// Types
-export interface Equipment {
-  id: string;
-  name: string;
-  make: string;
-  model: string;
-  serialNumber: string | null;
-  location: string | null;
-  installDate: string | null;
-  status: 'operational' | 'maintenance' | 'down' | 'retired';
-  hourlyCost: number;
-  manualPath: string | null; // Path to manual in workspace
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MaintenanceLog {
-  id: string;
-  equipmentId: string;
-  type: 'preventive' | 'corrective' | 'emergency' | 'inspection';
-  startedAt: string;
-  completedAt: string | null;
-  durationMinutes: number | null;
-  technician: string | null;
-  partsUsed: string | null; // JSON array
-  notes: string | null;
-  createdAt: string;
-}
-
-export interface FailureEvent {
-  id: string;
-  equipmentId: string;
-  occurredAt: string;
-  resolvedAt: string | null;
-  rootCause: string | null;
-  maintenanceLogId: string | null;
-  createdAt: string;
-}
-
-export interface EquipmentAnalytics {
-  equipmentId: string;
-  mtbf: number | null; // Mean Time Between Failures (hours)
-  mttr: number | null; // Mean Time To Recovery (hours)
-  availability: number | null; // Percentage (0-100)
-  totalFailures: number;
-  totalMaintenanceLogs: number;
-  lastMaintenanceDate: string | null;
-  lastMaintenanceType: string | null;
-  predictedNextMaintenance: string | null;
-}
+import type { Deal, DealActivity, DealStage, DealActivityType, PipelineAnalytics } from '@drasill/shared';
 
 let db: Database.Database | null = null;
 
 /**
- * Get or create the database connection
+ * Get the database file path
  */
-export function getDatabase(): Database.Database {
-  if (db) return db;
-
+function getDbPath(): string {
   const userDataPath = app.getPath('userData');
-  const dbPath = path.join(userDataPath, 'drasill-cloud.db');
+  return path.join(userDataPath, 'drasill.db');
+}
 
-  // Ensure directory exists
-  if (!fs.existsSync(userDataPath)) {
-    fs.mkdirSync(userDataPath, { recursive: true });
-  }
-
+/**
+ * Initialize the database connection and schema
+ */
+export function initDatabase(): void {
+  if (db) return;
+  
+  const dbPath = getDbPath();
+  console.log('Initializing database at:', dbPath);
+  
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   
   initializeSchema();
-  
-  return db;
-}
-
-/**
- * Initialize database schema
- */
-function initializeSchema(): void {
-  if (!db) return;
-
-  db.exec(`
-    -- Equipment/Assets table
-    CREATE TABLE IF NOT EXISTS equipment (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      make TEXT NOT NULL DEFAULT '',
-      model TEXT NOT NULL DEFAULT '',
-      serial_number TEXT,
-      location TEXT,
-      install_date TEXT,
-      status TEXT DEFAULT 'operational' CHECK(status IN ('operational', 'maintenance', 'down', 'retired')),
-      hourly_cost REAL DEFAULT 0,
-      manual_path TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    -- Maintenance Logs table
-    CREATE TABLE IF NOT EXISTS maintenance_logs (
-      id TEXT PRIMARY KEY,
-      equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('preventive', 'corrective', 'emergency', 'inspection')),
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      duration_minutes INTEGER,
-      technician TEXT,
-      parts_used TEXT,
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    -- Failure Events table (for MTBF calculation)
-    CREATE TABLE IF NOT EXISTS failure_events (
-      id TEXT PRIMARY KEY,
-      equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
-      occurred_at TEXT NOT NULL,
-      resolved_at TEXT,
-      root_cause TEXT,
-      maintenance_log_id TEXT REFERENCES maintenance_logs(id),
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    -- Indexes for performance
-    CREATE INDEX IF NOT EXISTS idx_maintenance_logs_equipment ON maintenance_logs(equipment_id);
-    CREATE INDEX IF NOT EXISTS idx_maintenance_logs_started ON maintenance_logs(started_at);
-    CREATE INDEX IF NOT EXISTS idx_failure_events_equipment ON failure_events(equipment_id);
-    CREATE INDEX IF NOT EXISTS idx_failure_events_occurred ON failure_events(occurred_at);
-  `);
-}
-
-/**
- * Generate a unique ID
- */
-function generateId(): string {
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-}
-
-// ============ Equipment CRUD ============
-
-export function createEquipment(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>): Equipment {
-  const db = getDatabase();
-  const id = generateId();
-  const now = new Date().toISOString();
-
-  const stmt = db.prepare(`
-    INSERT INTO equipment (id, name, make, model, serial_number, location, install_date, status, hourly_cost, manual_path, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    id,
-    data.name,
-    data.make,
-    data.model,
-    data.serialNumber,
-    data.location,
-    data.installDate,
-    data.status,
-    data.hourlyCost,
-    data.manualPath,
-    now,
-    now
-  );
-
-  return {
-    id,
-    ...data,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-export function getEquipment(id: string): Equipment | null {
-  const db = getDatabase();
-  const row = db.prepare('SELECT * FROM equipment WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  return row ? mapRowToEquipment(row) : null;
-}
-
-export function getAllEquipment(): Equipment[] {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM equipment ORDER BY name').all() as Record<string, unknown>[];
-  return rows.map(mapRowToEquipment);
-}
-
-export function updateEquipment(id: string, data: Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>): Equipment | null {
-  const db = getDatabase();
-  const existing = getEquipment(id);
-  if (!existing) return null;
-
-  const now = new Date().toISOString();
-  const updated = { ...existing, ...data, updatedAt: now };
-
-  const stmt = db.prepare(`
-    UPDATE equipment 
-    SET name = ?, make = ?, model = ?, serial_number = ?, location = ?, install_date = ?, status = ?, hourly_cost = ?, manual_path = ?, updated_at = ?
-    WHERE id = ?
-  `);
-
-  stmt.run(
-    updated.name,
-    updated.make,
-    updated.model,
-    updated.serialNumber,
-    updated.location,
-    updated.installDate,
-    updated.status,
-    updated.hourlyCost,
-    updated.manualPath,
-    now,
-    id
-  );
-
-  return updated;
-}
-
-export function deleteEquipment(id: string): boolean {
-  const db = getDatabase();
-  const result = db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
-  return result.changes > 0;
-}
-
-function mapRowToEquipment(row: Record<string, unknown>): Equipment {
-  return {
-    id: row.id as string,
-    name: row.name as string,
-    make: row.make as string,
-    model: row.model as string,
-    serialNumber: row.serial_number as string | null,
-    location: row.location as string | null,
-    installDate: row.install_date as string | null,
-    status: row.status as Equipment['status'],
-    hourlyCost: row.hourly_cost as number,
-    manualPath: row.manual_path as string | null,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
-  };
-}
-
-// ============ Maintenance Logs CRUD ============
-
-export function createMaintenanceLog(data: Omit<MaintenanceLog, 'id' | 'createdAt'>): MaintenanceLog {
-  const db = getDatabase();
-  const id = generateId();
-  const now = new Date().toISOString();
-
-  const stmt = db.prepare(`
-    INSERT INTO maintenance_logs (id, equipment_id, type, started_at, completed_at, duration_minutes, technician, parts_used, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    id,
-    data.equipmentId,
-    data.type,
-    data.startedAt,
-    data.completedAt,
-    data.durationMinutes,
-    data.technician,
-    data.partsUsed,
-    data.notes,
-    now
-  );
-
-  return {
-    id,
-    ...data,
-    createdAt: now,
-  };
-}
-
-export function getMaintenanceLog(id: string): MaintenanceLog | null {
-  const db = getDatabase();
-  const row = db.prepare('SELECT * FROM maintenance_logs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  return row ? mapRowToMaintenanceLog(row) : null;
-}
-
-export function getMaintenanceLogsForEquipment(equipmentId: string): MaintenanceLog[] {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM maintenance_logs WHERE equipment_id = ? ORDER BY started_at DESC').all(equipmentId) as Record<string, unknown>[];
-  return rows.map(mapRowToMaintenanceLog);
-}
-
-export function getAllMaintenanceLogs(): MaintenanceLog[] {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM maintenance_logs ORDER BY started_at DESC').all() as Record<string, unknown>[];
-  return rows.map(mapRowToMaintenanceLog);
-}
-
-export function updateMaintenanceLog(id: string, data: Partial<Omit<MaintenanceLog, 'id' | 'createdAt'>>): MaintenanceLog | null {
-  const db = getDatabase();
-  const existing = getMaintenanceLog(id);
-  if (!existing) return null;
-
-  const updated = { ...existing, ...data };
-
-  const stmt = db.prepare(`
-    UPDATE maintenance_logs 
-    SET equipment_id = ?, type = ?, started_at = ?, completed_at = ?, duration_minutes = ?, technician = ?, parts_used = ?, notes = ?
-    WHERE id = ?
-  `);
-
-  stmt.run(
-    updated.equipmentId,
-    updated.type,
-    updated.startedAt,
-    updated.completedAt,
-    updated.durationMinutes,
-    updated.technician,
-    updated.partsUsed,
-    updated.notes,
-    id
-  );
-
-  return updated;
-}
-
-export function deleteMaintenanceLog(id: string): boolean {
-  const db = getDatabase();
-  const result = db.prepare('DELETE FROM maintenance_logs WHERE id = ?').run(id);
-  return result.changes > 0;
-}
-
-function mapRowToMaintenanceLog(row: Record<string, unknown>): MaintenanceLog {
-  return {
-    id: row.id as string,
-    equipmentId: row.equipment_id as string,
-    type: row.type as MaintenanceLog['type'],
-    startedAt: row.started_at as string,
-    completedAt: row.completed_at as string | null,
-    durationMinutes: row.duration_minutes as number | null,
-    technician: row.technician as string | null,
-    partsUsed: row.parts_used as string | null,
-    notes: row.notes as string | null,
-    createdAt: row.created_at as string,
-  };
-}
-
-// ============ Failure Events CRUD ============
-
-export function createFailureEvent(data: Omit<FailureEvent, 'id' | 'createdAt'>): FailureEvent {
-  const db = getDatabase();
-  const id = generateId();
-  const now = new Date().toISOString();
-
-  const stmt = db.prepare(`
-    INSERT INTO failure_events (id, equipment_id, occurred_at, resolved_at, root_cause, maintenance_log_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    id,
-    data.equipmentId,
-    data.occurredAt,
-    data.resolvedAt,
-    data.rootCause,
-    data.maintenanceLogId,
-    now
-  );
-
-  return {
-    id,
-    ...data,
-    createdAt: now,
-  };
-}
-
-export function getFailureEventsForEquipment(equipmentId: string): FailureEvent[] {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM failure_events WHERE equipment_id = ? ORDER BY occurred_at DESC').all(equipmentId) as Record<string, unknown>[];
-  return rows.map(mapRowToFailureEvent);
-}
-
-function mapRowToFailureEvent(row: Record<string, unknown>): FailureEvent {
-  return {
-    id: row.id as string,
-    equipmentId: row.equipment_id as string,
-    occurredAt: row.occurred_at as string,
-    resolvedAt: row.resolved_at as string | null,
-    rootCause: row.root_cause as string | null,
-    maintenanceLogId: row.maintenance_log_id as string | null,
-    createdAt: row.created_at as string,
-  };
-}
-
-// ============ Analytics Calculations ============
-
-export function calculateEquipmentAnalytics(equipmentId: string): EquipmentAnalytics {
-  // Get failure events
-  const failures = getFailureEventsForEquipment(equipmentId);
-  const totalFailures = failures.length;
-
-  // Get maintenance logs
-  const logs = getMaintenanceLogsForEquipment(equipmentId);
-  const totalMaintenanceLogs = logs.length;
-
-  // Last maintenance info
-  const lastLog = logs[0];
-  const lastMaintenanceDate = lastLog?.startedAt || null;
-  const lastMaintenanceType = lastLog?.type || null;
-
-  // Calculate MTBF (Mean Time Between Failures)
-  let mtbf: number | null = null;
-  if (failures.length >= 2) {
-    const sortedFailures = [...failures].sort((a, b) => 
-      new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
-    );
-    
-    let totalTimeBetween = 0;
-    for (let i = 1; i < sortedFailures.length; i++) {
-      const prev = new Date(sortedFailures[i - 1].occurredAt);
-      const curr = new Date(sortedFailures[i].occurredAt);
-      totalTimeBetween += (curr.getTime() - prev.getTime()) / (1000 * 60 * 60); // hours
-    }
-    mtbf = Math.round(totalTimeBetween / (failures.length - 1));
-  }
-
-  // Calculate MTTR (Mean Time To Recovery)
-  let mttr: number | null = null;
-  const resolvedFailures = failures.filter(f => f.resolvedAt);
-  if (resolvedFailures.length > 0) {
-    let totalRecoveryTime = 0;
-    for (const failure of resolvedFailures) {
-      const occurred = new Date(failure.occurredAt);
-      const resolved = new Date(failure.resolvedAt!);
-      totalRecoveryTime += (resolved.getTime() - occurred.getTime()) / (1000 * 60 * 60); // hours
-    }
-    mttr = Math.round((totalRecoveryTime / resolvedFailures.length) * 10) / 10;
-  }
-
-  // Calculate Availability
-  let availability: number | null = null;
-  if (mtbf !== null && mttr !== null && (mtbf + mttr) > 0) {
-    availability = Math.round((mtbf / (mtbf + mttr)) * 1000) / 10;
-  }
-
-  // Predict next maintenance (simple: average days between maintenance)
-  let predictedNextMaintenance: string | null = null;
-  if (logs.length >= 2) {
-    const sortedLogs = [...logs].sort((a, b) => 
-      new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()
-    );
-    
-    let totalDaysBetween = 0;
-    for (let i = 1; i < sortedLogs.length; i++) {
-      const prev = new Date(sortedLogs[i - 1].startedAt);
-      const curr = new Date(sortedLogs[i].startedAt);
-      totalDaysBetween += (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
-    }
-    const avgDays = totalDaysBetween / (logs.length - 1);
-    
-    if (lastMaintenanceDate) {
-      const lastDate = new Date(lastMaintenanceDate);
-      const predictedDate = new Date(lastDate.getTime() + avgDays * 24 * 60 * 60 * 1000);
-      predictedNextMaintenance = predictedDate.toISOString();
-    }
-  }
-
-  return {
-    equipmentId,
-    mtbf,
-    mttr,
-    availability,
-    totalFailures,
-    totalMaintenanceLogs,
-    lastMaintenanceDate,
-    lastMaintenanceType,
-    predictedNextMaintenance,
-  };
 }
 
 /**
@@ -486,4 +41,420 @@ export function closeDatabase(): void {
     db.close();
     db = null;
   }
+}
+
+/**
+ * Get the database instance
+ */
+export function getDatabase(): Database.Database | null {
+  return db;
+}
+
+/**
+ * Initialize database schema
+ */
+function initializeSchema(): void {
+  if (!db) return;
+
+  db.exec(`
+    -- Deals table
+    CREATE TABLE IF NOT EXISTS deals (
+      id TEXT PRIMARY KEY,
+      deal_number TEXT NOT NULL UNIQUE,
+      borrower_name TEXT NOT NULL,
+      borrower_contact TEXT,
+      loan_amount REAL NOT NULL DEFAULT 0,
+      interest_rate REAL,
+      term_months INTEGER,
+      collateral_description TEXT,
+      stage TEXT DEFAULT 'lead' CHECK(stage IN ('lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined')),
+      priority TEXT DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high')),
+      assigned_to TEXT,
+      document_path TEXT,
+      notes TEXT,
+      expected_close_date TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Deal activities table
+    CREATE TABLE IF NOT EXISTS deal_activities (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('note', 'call', 'email', 'document', 'meeting')),
+      description TEXT NOT NULL,
+      performed_by TEXT,
+      performed_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
+    );
+
+    -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage);
+    CREATE INDEX IF NOT EXISTS idx_deals_borrower ON deals(borrower_name);
+    CREATE INDEX IF NOT EXISTS idx_activities_deal ON deal_activities(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_activities_type ON deal_activities(type);
+  `);
+}
+
+/**
+ * Generate unique ID
+ */
+function generateId(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/**
+ * Generate deal number
+ */
+function generateDealNumber(): string {
+  const year = new Date().getFullYear();
+  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `DEAL-${year}-${random}`;
+}
+
+// =============================================================================
+// DEAL OPERATIONS
+// =============================================================================
+
+/**
+ * Create a new deal
+ */
+export function createDeal(data: Partial<Deal>): Deal {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  const dealNumber = data.dealNumber || generateDealNumber();
+  const now = new Date().toISOString();
+  
+  const stmt = db.prepare(`
+    INSERT INTO deals (id, deal_number, borrower_name, borrower_contact, loan_amount, interest_rate, term_months, collateral_description, stage, priority, assigned_to, document_path, notes, expected_close_date, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    id,
+    dealNumber,
+    data.borrowerName || 'Unknown',
+    data.borrowerContact || null,
+    data.loanAmount || 0,
+    data.interestRate || null,
+    data.termMonths || null,
+    data.collateralDescription || null,
+    data.stage || 'lead',
+    data.priority || 'medium',
+    data.assignedTo || null,
+    data.documentPath || null,
+    data.notes || null,
+    data.expectedCloseDate || null,
+    now,
+    now
+  );
+  
+  return getDeal(id)!;
+}
+
+/**
+ * Get a deal by ID
+ */
+export function getDeal(id: string): Deal | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare('SELECT * FROM deals WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  
+  return mapRowToDeal(row);
+}
+
+/**
+ * Get all deals
+ */
+export function getAllDeals(): Deal[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM deals ORDER BY updated_at DESC').all() as any[];
+  return rows.map(mapRowToDeal);
+}
+
+/**
+ * Update a deal
+ */
+export function updateDeal(id: string, data: Partial<Deal>): Deal | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const existing = getDeal(id);
+  if (!existing) return null;
+  
+  const now = new Date().toISOString();
+  
+  // Auto-create activity if stage changed
+  if (data.stage && data.stage !== existing.stage) {
+    createDealActivity({
+      dealId: id,
+      type: 'note',
+      description: `Stage changed from "${existing.stage}" to "${data.stage}"`,
+      performedBy: 'System'
+    });
+  }
+  
+  const stmt = db.prepare(`
+    UPDATE deals SET
+      borrower_name = COALESCE(?, borrower_name),
+      borrower_contact = COALESCE(?, borrower_contact),
+      loan_amount = COALESCE(?, loan_amount),
+      interest_rate = COALESCE(?, interest_rate),
+      term_months = COALESCE(?, term_months),
+      collateral_description = COALESCE(?, collateral_description),
+      stage = COALESCE(?, stage),
+      priority = COALESCE(?, priority),
+      assigned_to = COALESCE(?, assigned_to),
+      document_path = COALESCE(?, document_path),
+      notes = COALESCE(?, notes),
+      expected_close_date = COALESCE(?, expected_close_date),
+      updated_at = ?
+    WHERE id = ?
+  `);
+  
+  stmt.run(
+    data.borrowerName,
+    data.borrowerContact,
+    data.loanAmount,
+    data.interestRate,
+    data.termMonths,
+    data.collateralDescription,
+    data.stage,
+    data.priority,
+    data.assignedTo,
+    data.documentPath,
+    data.notes,
+    data.expectedCloseDate,
+    now,
+    id
+  );
+  
+  return getDeal(id);
+}
+
+/**
+ * Delete a deal
+ */
+export function deleteDeal(id: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM deals WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Detect deal from file path
+ */
+export function detectDealFromPath(filePath: string): Deal | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  // Try to match by document_path
+  const byPath = db.prepare('SELECT * FROM deals WHERE document_path = ?').get(filePath) as any;
+  if (byPath) return mapRowToDeal(byPath);
+  
+  // Try to match by folder structure
+  const pathParts = filePath.split(/[/\\]/);
+  for (const part of pathParts.reverse()) {
+    const byName = db.prepare('SELECT * FROM deals WHERE borrower_name LIKE ?').get(`%${part}%`) as any;
+    if (byName) return mapRowToDeal(byName);
+    
+    const byNumber = db.prepare('SELECT * FROM deals WHERE deal_number LIKE ?').get(`%${part}%`) as any;
+    if (byNumber) return mapRowToDeal(byNumber);
+  }
+  
+  return null;
+}
+
+// =============================================================================
+// DEAL ACTIVITY OPERATIONS
+// =============================================================================
+
+/**
+ * Create a deal activity
+ */
+export function createDealActivity(data: Partial<DealActivity>): DealActivity {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  const now = new Date().toISOString();
+  
+  const stmt = db.prepare(`
+    INSERT INTO deal_activities (id, deal_id, type, description, performed_by, performed_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    id,
+    data.dealId,
+    data.type || 'note',
+    data.description || '',
+    data.performedBy || null,
+    data.performedAt || now,
+    now
+  );
+  
+  // Update deal's updated_at
+  if (data.dealId) {
+    db.prepare('UPDATE deals SET updated_at = ? WHERE id = ?').run(now, data.dealId);
+  }
+  
+  return getDealActivity(id)!;
+}
+
+/**
+ * Get a deal activity by ID
+ */
+export function getDealActivity(id: string): DealActivity | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare('SELECT * FROM deal_activities WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  
+  return mapRowToActivity(row);
+}
+
+/**
+ * Get activities for a deal
+ */
+export function getActivitiesForDeal(dealId: string): DealActivity[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM deal_activities WHERE deal_id = ? ORDER BY performed_at DESC').all(dealId) as any[];
+  return rows.map(mapRowToActivity);
+}
+
+/**
+ * Get all activities
+ */
+export function getAllActivities(): DealActivity[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM deal_activities ORDER BY performed_at DESC').all() as any[];
+  return rows.map(mapRowToActivity);
+}
+
+/**
+ * Update a deal activity
+ */
+export function updateDealActivity(id: string, data: Partial<DealActivity>): DealActivity | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const existing = getDealActivity(id);
+  if (!existing) return null;
+  
+  const stmt = db.prepare(`
+    UPDATE deal_activities SET
+      type = COALESCE(?, type),
+      description = COALESCE(?, description),
+      performed_by = COALESCE(?, performed_by),
+      performed_at = COALESCE(?, performed_at)
+    WHERE id = ?
+  `);
+  
+  stmt.run(
+    data.type,
+    data.description,
+    data.performedBy,
+    data.performedAt,
+    id
+  );
+  
+  return getDealActivity(id);
+}
+
+/**
+ * Delete a deal activity
+ */
+export function deleteDealActivity(id: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM deal_activities WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// =============================================================================
+// PIPELINE ANALYTICS
+// =============================================================================
+
+/**
+ * Calculate pipeline analytics
+ */
+export function calculatePipelineAnalytics(): PipelineAnalytics {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stages: DealStage[] = ['lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined'];
+  
+  const byStage: Record<DealStage, { count: number; totalValue: number }> = {} as any;
+  let totalDeals = 0;
+  let totalPipelineValue = 0;
+  
+  for (const stage of stages) {
+    const result = db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(loan_amount), 0) as total
+      FROM deals WHERE stage = ?
+    `).get(stage) as { count: number; total: number };
+    
+    byStage[stage] = { count: result.count, totalValue: result.total };
+    totalDeals += result.count;
+    
+    // Pipeline value excludes closed and declined
+    if (!['closed', 'declined'].includes(stage)) {
+      totalPipelineValue += result.total;
+    }
+  }
+  
+  // Average deal size (excluding closed and declined)
+  const activeResult = db.prepare(`
+    SELECT AVG(loan_amount) as avg
+    FROM deals WHERE stage NOT IN ('closed', 'declined') AND loan_amount > 0
+  `).get() as { avg: number | null };
+  
+  const averageDealSize = activeResult.avg || 0;
+  
+  return {
+    totalDeals,
+    totalPipelineValue,
+    averageDealSize,
+    byStage
+  };
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function mapRowToDeal(row: any): Deal {
+  return {
+    id: row.id,
+    dealNumber: row.deal_number,
+    borrowerName: row.borrower_name,
+    borrowerContact: row.borrower_contact,
+    loanAmount: row.loan_amount,
+    interestRate: row.interest_rate,
+    termMonths: row.term_months,
+    collateralDescription: row.collateral_description,
+    stage: row.stage as DealStage,
+    priority: row.priority,
+    assignedTo: row.assigned_to,
+    documentPath: row.document_path,
+    notes: row.notes,
+    expectedCloseDate: row.expected_close_date,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapRowToActivity(row: any): DealActivity {
+  return {
+    id: row.id,
+    dealId: row.deal_id,
+    type: row.type as DealActivityType,
+    description: row.description,
+    performedBy: row.performed_by,
+    performedAt: row.performed_at,
+    createdAt: row.created_at
+  };
 }

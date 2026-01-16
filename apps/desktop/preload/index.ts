@@ -7,10 +7,9 @@ import {
   ChatRequest, 
   ChatStreamChunk, 
   PersistedState,
-  Equipment,
-  MaintenanceLog,
-  FailureEvent,
-  EquipmentAnalytics,
+  Deal,
+  DealActivity,
+  PipelineAnalytics,
   SchematicToolCall,
   SchematicToolResponse,
 } from '@drasill/shared';
@@ -226,7 +225,7 @@ const api = {
   },
 
   // ==========================================
-  // Database & Equipment API
+  // Database & Deal API
   // ==========================================
 
   /**
@@ -237,113 +236,88 @@ const api = {
   },
 
   /**
-   * Get all equipment
+   * Get all deals
    */
-  getAllEquipment: (): Promise<Equipment[]> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_GET_ALL);
+  getAllDeals: (): Promise<Deal[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_GET_ALL);
   },
 
   /**
-   * Get single equipment by ID
+   * Get single deal by ID
    */
-  getEquipment: (id: string): Promise<Equipment | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_GET, id);
+  getDeal: (id: string): Promise<Deal | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_GET, id);
   },
 
   /**
-   * Add new equipment
+   * Add new deal
    */
-  addEquipment: (equipment: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Equipment> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_ADD, equipment);
+  addDeal: (deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>): Promise<Deal> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_ADD, deal);
   },
 
   /**
-   * Update equipment
+   * Update deal
    */
-  updateEquipment: (id: string, equipment: Partial<Equipment>): Promise<Equipment | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_UPDATE, id, equipment);
+  updateDeal: (id: string, deal: Partial<Deal>): Promise<Deal | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_UPDATE, id, deal);
   },
 
   /**
-   * Delete equipment
+   * Delete deal
    */
-  deleteEquipment: (id: string): Promise<boolean> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_DELETE, id);
+  deleteDeal: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_DELETE, id);
   },
 
   /**
-   * Detect equipment from file path
+   * Detect deal from file path (auto-detect from folder structure)
    */
-  detectEquipmentFromPath: (filePath: string): Promise<Equipment | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.EQUIPMENT_DETECT_FROM_PATH, filePath);
-  },
-
-  // ==========================================
-  // Maintenance Logs API
-  // ==========================================
-
-  /**
-   * Add maintenance log
-   */
-  addMaintenanceLog: (log: Omit<MaintenanceLog, 'id' | 'createdAt'>): Promise<MaintenanceLog> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOGS_ADD, log);
-  },
-
-  /**
-   * Get all maintenance logs
-   */
-  getMaintenanceLogs: (limit?: number): Promise<MaintenanceLog[]> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOGS_GET, limit);
-  },
-
-  /**
-   * Get maintenance logs for specific equipment
-   */
-  getMaintenanceLogsByEquipment: (equipmentId: string, limit?: number): Promise<MaintenanceLog[]> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOGS_GET_BY_EQUIPMENT, equipmentId, limit);
-  },
-
-  /**
-   * Update maintenance log
-   */
-  updateMaintenanceLog: (id: string, data: Partial<Omit<MaintenanceLog, 'id' | 'createdAt'>>): Promise<MaintenanceLog | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOGS_UPDATE, id, data);
-  },
-
-  /**
-   * Delete maintenance log
-   */
-  deleteMaintenanceLog: (id: string): Promise<boolean> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOGS_DELETE, id);
+  detectDealFromPath: (filePath: string): Promise<Deal | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_DETECT_FROM_PATH, filePath);
   },
 
   // ==========================================
-  // Failure Events API
+  // Deal Activities API
   // ==========================================
 
   /**
-   * Add failure event
+   * Add deal activity
    */
-  addFailureEvent: (event: Omit<FailureEvent, 'id' | 'createdAt'>): Promise<FailureEvent> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.FAILURE_ADD, event);
+  addDealActivity: (activity: Omit<DealActivity, 'id' | 'createdAt'>): Promise<DealActivity> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_ADD, activity);
   },
 
   /**
-   * Get failure events
+   * Get deal activities
    */
-  getFailureEvents: (equipmentId?: string, limit?: number): Promise<FailureEvent[]> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.FAILURE_GET, equipmentId, limit);
+  getDealActivities: (dealId?: string, limit?: number): Promise<DealActivity[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_GET, dealId, limit);
+  },
+
+  /**
+   * Update deal activity
+   */
+  updateDealActivity: (id: string, data: Partial<Omit<DealActivity, 'id' | 'createdAt'>>): Promise<DealActivity | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_UPDATE, id, data);
+  },
+
+  /**
+   * Delete deal activity
+   */
+  deleteDealActivity: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_DELETE, id);
   },
 
   // ==========================================
-  // Analytics API
+  // Pipeline Analytics API
   // ==========================================
 
   /**
-   * Get equipment analytics (MTBF, MTTR, availability)
+   * Get pipeline analytics
    */
-  getEquipmentAnalytics: (equipmentId?: string): Promise<EquipmentAnalytics[]> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.ANALYTICS_GET, equipmentId);
+  getPipelineAnalytics: (): Promise<PipelineAnalytics> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_GET);
   },
 
   // ==========================================
