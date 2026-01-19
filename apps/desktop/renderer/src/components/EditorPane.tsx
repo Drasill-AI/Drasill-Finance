@@ -64,8 +64,8 @@ export function EditorPane() {
       <div className={styles.empty}>
         <div className={styles.emptyContent}>
           <img src={logoImage} alt="Drasill" className={styles.logo} />
-          <h2>Drasill Cloud</h2>
-          <p>Equipment Documentation Viewer</p>
+          <h2>Drasill Finance</h2>
+          <p>Deal Management & Documentation</p>
           <div className={styles.shortcuts}>
             <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> Open Folder</p>
             <p><kbd>Ctrl</kbd>+<kbd>P</kbd> Command Palette</p>
@@ -88,12 +88,23 @@ export function EditorPane() {
 
   // PDF viewer
   if (activeTab.type === 'pdf') {
-    return <PdfViewer fileName={activeTab.name} path={activeTab.path} />;
+    return <PdfViewer 
+      fileName={activeTab.name} 
+      path={activeTab.path} 
+      source={activeTab.source}
+      oneDriveId={activeTab.oneDriveId}
+      initialPage={activeTab.initialPage}
+    />;
   }
 
   // Word viewer
   if (activeTab.type === 'word') {
-    return <WordViewer fileName={activeTab.name} path={activeTab.path} />;
+    return <WordViewer 
+      fileName={activeTab.name} 
+      path={activeTab.path}
+      source={activeTab.source}
+      oneDriveId={activeTab.oneDriveId}
+    />;
   }
 
   // Schematic viewer

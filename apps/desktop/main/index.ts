@@ -2,6 +2,8 @@ import { app, BrowserWindow, dialog, Menu, shell, nativeImage } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc';
 import { createMenu } from './menu';
+import { initDatabase } from './database';
+import { initRAG } from './rag';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -34,7 +36,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'Drasill Cloud',
+    title: 'Drasill Finance',
     icon: appIcon || iconPath,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -77,6 +79,8 @@ function setupMenu(): void {
 
 // App lifecycle
 app.whenReady().then(() => {
+  initDatabase();
+  initRAG();
   setupIpcHandlers();
   createWindow();
   setupMenu();

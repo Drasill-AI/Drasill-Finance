@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Deal, DealActivity, BottomPanelState, SchematicToolCall, SchematicData } from '@drasill/shared';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Deal, DealActivity, BottomPanelState, SchematicToolCall, SchematicData, OneDriveAuthStatus, OneDriveItem } from '@drasill/shared';
 
 interface ToastMessage {
   id: string;
@@ -51,12 +51,21 @@ interface AppState {
   // Bottom Panel
   bottomPanelState: BottomPanelState;
 
+  // OneDrive
+  oneDriveStatus: OneDriveAuthStatus;
+  workspaceSource: 'local' | 'onedrive';
+  oneDriveFolderId: string | null;
+  isOneDrivePickerOpen: boolean;
+
   // Actions
   openWorkspace: () => Promise<void>;
+  closeWorkspace: () => Promise<void>;
   setWorkspacePath: (path: string | null) => void;
   loadDirectory: (path: string) => Promise<TreeNode[]>;
   toggleDirectory: (node: TreeNode) => Promise<void>;
   refreshTree: () => Promise<void>;
+  deleteFile: (filePath: string) => Promise<boolean>;
+  deleteFolder: (folderPath: string) => Promise<boolean>;
   
   openFile: (path: string, name: string) => Promise<void>;
   closeTab: (tabId: string) => void;
@@ -78,7 +87,7 @@ interface AppState {
   cancelChat: () => void;
 
   // RAG actions
-  indexWorkspace: () => Promise<void>;
+  indexWorkspace: (forceReindex?: boolean) => Promise<void>;
   checkRagStatus: () => Promise<void>;
   loadRagCache: (workspacePath: string) => Promise<boolean>;
   clearRagIndex: () => Promise<void>;
@@ -104,6 +113,16 @@ interface AppState {
 
   // Schematic actions
   openSchematicTab: (toolCall: SchematicToolCall) => Promise<void>;
+
+  // OneDrive actions
+  checkOneDriveStatus: () => Promise<void>;
+  loginOneDrive: () => Promise<void>;
+  logoutOneDrive: () => Promise<void>;
+  openOneDriveWorkspace: (folderId: string, folderName: string, folderPath: string) => Promise<void>;
+  loadOneDriveDirectory: (folderId?: string) => Promise<TreeNode[]>;
+  toggleOneDriveDirectory: (node: TreeNode) => Promise<void>;
+  openOneDriveFile: (node: TreeNode, initialPage?: number) => Promise<void>;
+  setOneDrivePickerOpen: (open: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -146,6 +165,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     activeTab: 'activities',
   },
 
+  // OneDrive state
+  oneDriveStatus: { isAuthenticated: false },
+  workspaceSource: 'local',
+  oneDriveFolderId: null,
+  isOneDrivePickerOpen: false,
+
   // Actions
   openWorkspace: async () => {
     try {
@@ -168,6 +193,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch (error) {
       get().showToast('error', `Failed to open workspace: ${error}`);
+    }
+  },
+
+  closeWorkspace: async () => {
+    try {
+      await window.electronAPI.closeWorkspace();
+      set({ 
+        workspacePath: null, 
+        tree: [], 
+        tabs: [], 
+        activeTabId: null, 
+        fileContents: new Map(),
+        selectedDealId: null,
+        detectedDeal: null,
+      });
+      get().savePersistedState();
+      get().showToast('info', 'Workspace closed');
+    } catch (error) {
+      get().showToast('error', `Failed to close workspace: ${error}`);
     }
   },
 
@@ -211,6 +255,44 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     } catch (error) {
       get().showToast('error', `Failed to refresh tree: ${error}`);
+    }
+  },
+
+  deleteFile: async (filePath: string): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.deleteFile(filePath);
+      if (result.success) {
+        // Close any open tabs for this file
+        const { tabs, activeTabId } = get();
+        const tabToClose = tabs.find(t => t.path === filePath);
+        if (tabToClose) {
+          get().closeTab(tabToClose.id);
+        }
+        await get().refreshTree();
+        get().showToast('success', 'File deleted');
+      }
+      return result.success;
+    } catch (error) {
+      get().showToast('error', `Failed to delete file: ${error}`);
+      return false;
+    }
+  },
+
+  deleteFolder: async (folderPath: string): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.deleteFolder(folderPath);
+      if (result.success) {
+        // Close any open tabs for files in this folder
+        const { tabs } = get();
+        const tabsToClose = tabs.filter(t => t.path.startsWith(folderPath));
+        tabsToClose.forEach(tab => get().closeTab(tab.id));
+        await get().refreshTree();
+        get().showToast('success', 'Folder deleted');
+      }
+      return result.success;
+    } catch (error) {
+      get().showToast('error', `Failed to delete folder: ${error}`);
+      return false;
     }
   },
 
@@ -540,8 +622,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // RAG actions
-  indexWorkspace: async () => {
-    const { workspacePath, hasApiKey } = get();
+  indexWorkspace: async (forceReindex = false) => {
+    const { workspacePath, hasApiKey, workspaceSource, oneDriveFolderId } = get();
     if (!workspacePath) {
       get().showToast('error', 'No workspace open');
       return;
@@ -570,7 +652,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     try {
-      const result = await window.electronAPI.indexWorkspace(workspacePath);
+      let result;
+      
+      // Use appropriate indexer based on workspace source
+      if (workspaceSource === 'onedrive' && oneDriveFolderId) {
+        result = await window.electronAPI.indexOneDriveWorkspace(oneDriveFolderId, workspacePath, forceReindex);
+      } else {
+        result = await window.electronAPI.indexWorkspace(workspacePath, forceReindex);
+      }
+      
       if (!result.success) {
         set({ isIndexing: false, indexingProgress: null });
         get().showToast('error', result.error || 'Indexing failed');
@@ -628,7 +718,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // State persistence
   savePersistedState: async () => {
-    const { workspacePath, tabs, activeTabId } = get();
+    const { workspacePath, tabs, activeTabId, workspaceSource, oneDriveFolderId } = get();
     const state: PersistedState = {
       workspacePath,
       openTabs: tabs.map(t => ({
@@ -638,6 +728,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         type: t.type,
       })),
       activeTabId,
+      workspaceSource,
+      oneDriveFolderId: oneDriveFolderId || undefined,
     };
     try {
       await window.electronAPI.saveState(state);
@@ -650,7 +742,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const state = await window.electronAPI.loadState();
       if (state?.workspacePath) {
-        await get().restoreWorkspace(state.workspacePath);
+        // Check if this was an OneDrive workspace
+        if (state.workspaceSource === 'onedrive' && state.oneDriveFolderId) {
+          // Restore OneDrive workspace
+          await get().restoreOneDriveWorkspace(state.oneDriveFolderId, state.workspacePath);
+        } else {
+          // Restore local workspace
+          await get().restoreWorkspace(state.workspacePath);
+        }
         
         // Restore tabs
         if (state.openTabs && state.openTabs.length > 0) {
@@ -665,6 +764,52 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to load persisted state:', error);
+    }
+  },
+
+  restoreOneDriveWorkspace: async (folderId: string, folderPath: string) => {
+    try {
+      // Check if still authenticated
+      const authStatus = await window.electronAPI.getOneDriveAuthStatus();
+      if (!authStatus.isAuthenticated) {
+        console.log('[Store] OneDrive not authenticated, skipping workspace restore');
+        return;
+      }
+
+      set({ 
+        workspacePath: folderPath,
+        workspaceSource: 'onedrive',
+        oneDriveFolderId: folderId,
+        tree: [],
+        tabs: [],
+        activeTabId: null,
+        fileContents: new Map(),
+      });
+      
+      const children = await get().loadOneDriveDirectory(folderId);
+      const folderName = folderPath.split(/[\/]/).pop() || 'OneDrive';
+      set({
+        tree: [{
+          id: folderId,
+          name: folderName,
+          path: folderPath,
+          isDirectory: true,
+          isExpanded: true,
+          children,
+          source: 'onedrive',
+          oneDriveId: folderId,
+        }],
+      });
+      
+      // Try to load cached RAG embeddings for the workspace
+      const loaded = await get().loadRagCache(folderPath);
+      if (loaded) {
+        console.log('[Store] Successfully loaded cached RAG embeddings for OneDrive workspace');
+      }
+    } catch (error) {
+      console.error('[Store] Failed to restore OneDrive workspace:', error);
+      // Clear state on error
+      set({ workspacePath: null, workspaceSource: 'local', oneDriveFolderId: null });
     }
   },
 
@@ -813,27 +958,245 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showToast('error', `Failed to open schematic: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
+
+  // OneDrive actions
+  checkOneDriveStatus: async () => {
+    try {
+      const status = await window.electronAPI.getOneDriveAuthStatus();
+      set({ oneDriveStatus: status });
+    } catch (error) {
+      console.error('[Store] Failed to check OneDrive status:', error);
+    }
+  },
+
+  loginOneDrive: async () => {
+    try {
+      get().showToast('info', 'Opening Microsoft login...');
+      const result = await window.electronAPI.startOneDriveAuth();
+      if (result.success) {
+        const status = await window.electronAPI.getOneDriveAuthStatus();
+        set({ oneDriveStatus: status });
+        get().showToast('success', `Connected to OneDrive as ${status.userName || status.userEmail}`);
+      } else {
+        get().showToast('error', result.error || 'OneDrive login failed');
+      }
+    } catch (error) {
+      console.error('[Store] OneDrive login error:', error);
+      get().showToast('error', 'Failed to connect to OneDrive');
+    }
+  },
+
+  logoutOneDrive: async () => {
+    try {
+      await window.electronAPI.logoutOneDrive();
+      set({ oneDriveStatus: { isAuthenticated: false } });
+      get().showToast('info', 'Disconnected from OneDrive');
+    } catch (error) {
+      console.error('[Store] OneDrive logout error:', error);
+    }
+  },
+
+  openOneDriveWorkspace: async (folderId: string, folderName: string, folderPath: string) => {
+    try {
+      set({ 
+        workspacePath: folderPath || folderName,
+        workspaceSource: 'onedrive',
+        oneDriveFolderId: folderId,
+        tree: [],
+        tabs: [],
+        activeTabId: null,
+        fileContents: new Map(),
+        isOneDrivePickerOpen: false,
+      });
+      
+      const children = await get().loadOneDriveDirectory(folderId);
+      set({
+        tree: [{
+          id: folderId,
+          name: folderName || 'OneDrive',
+          path: folderPath || folderName,
+          isDirectory: true,
+          isExpanded: true,
+          children,
+          source: 'onedrive',
+          oneDriveId: folderId,
+        }],
+      });
+      
+      get().savePersistedState();
+      get().showToast('success', `Opened OneDrive folder: ${folderName}`);
+    } catch (error) {
+      console.error('[Store] Failed to open OneDrive workspace:', error);
+      get().showToast('error', 'Failed to open OneDrive folder');
+    }
+  },
+
+  loadOneDriveDirectory: async (folderId?: string): Promise<TreeNode[]> => {
+    try {
+      const items = await window.electronAPI.listOneDriveFolder(folderId);
+      return items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        isDirectory: item.isDirectory,
+        extension: item.isDirectory ? undefined : item.name.split('.').pop(),
+        isExpanded: false,
+        source: 'onedrive' as const,
+        oneDriveId: item.id,
+      }));
+    } catch (error) {
+      console.error('[Store] Failed to load OneDrive directory:', error);
+      get().showToast('error', 'Failed to load OneDrive folder contents');
+      return [];
+    }
+  },
+
+  toggleOneDriveDirectory: async (node: TreeNode) => {
+    if (!node.isDirectory || node.source !== 'onedrive') return;
+
+    const updateNode = (nodes: TreeNode[]): TreeNode[] => {
+      return nodes.map((n) => {
+        if (n.id === node.id) {
+          return { ...n, isExpanded: !n.isExpanded };
+        }
+        if (n.children) {
+          return { ...n, children: updateNode(n.children) };
+        }
+        return n;
+      });
+    };
+
+    // If expanding and no children loaded yet
+    if (!node.isExpanded && (!node.children || node.children.length === 0)) {
+      try {
+        const children = await get().loadOneDriveDirectory(node.oneDriveId);
+        const updateWithChildren = (nodes: TreeNode[]): TreeNode[] => {
+          return nodes.map((n) => {
+            if (n.id === node.id) {
+              return { ...n, isExpanded: true, children };
+            }
+            if (n.children) {
+              return { ...n, children: updateWithChildren(n.children) };
+            }
+            return n;
+          });
+        };
+        set({ tree: updateWithChildren(get().tree) });
+      } catch (error) {
+        get().showToast('error', 'Failed to load folder contents');
+      }
+    } else {
+      set({ tree: updateNode(get().tree) });
+    }
+  },
+
+  openOneDriveFile: async (node: TreeNode, initialPage?: number) => {
+    console.log('[Store] openOneDriveFile called with:', node, 'initialPage:', initialPage);
+    
+    if (node.isDirectory || node.source !== 'onedrive' || !node.oneDriveId) {
+      console.log('[Store] openOneDriveFile early return - isDirectory:', node.isDirectory, 'source:', node.source, 'oneDriveId:', node.oneDriveId);
+      return;
+    }
+
+    try {
+      // Check if tab already exists
+      const existingTab = get().tabs.find((t) => t.id === node.id);
+      if (existingTab) {
+        console.log('[Store] Tab already exists, activating:', existingTab.id);
+        // Update initialPage if navigating from citation
+        if (initialPage) {
+          const updatedTabs = get().tabs.map(t => 
+            t.id === existingTab.id ? { ...t, initialPage } : t
+          );
+          set({ activeTabId: existingTab.id, tabs: updatedTabs });
+        } else {
+          set({ activeTabId: existingTab.id });
+        }
+        return;
+      }
+
+      // Determine file type
+      const ext = node.extension?.toLowerCase() || '';
+      let type: 'text' | 'markdown' | 'pdf' | 'word' | 'unknown' = 'unknown';
+      if (['.md', '.markdown'].includes(`.${ext}`)) type = 'markdown';
+      else if (['.txt', '.json', '.js', '.ts', '.tsx', '.jsx', '.css', '.html', '.yml', '.yaml'].includes(`.${ext}`)) type = 'text';
+      else if (ext === 'pdf') type = 'pdf';
+      else if (['doc', 'docx'].includes(ext)) type = 'word';
+      
+      console.log('[Store] Opening OneDrive file, type:', type, 'ext:', ext);
+
+      // Read file content from OneDrive
+      const { content, mimeType } = await window.electronAPI.readOneDriveFile(node.oneDriveId);
+      console.log('[Store] Read file content, mimeType:', mimeType, 'length:', content.length);
+      
+      // Store content
+      const fileContents = new Map(get().fileContents);
+      fileContents.set(node.id, content);
+
+      // Create tab
+      const newTab: Tab = {
+        id: node.id,
+        name: node.name,
+        path: node.path,
+        type,
+        source: 'onedrive',
+        oneDriveId: node.oneDriveId,
+        initialPage,
+      };
+
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        fileContents,
+      }));
+
+      get().savePersistedState();
+    } catch (error) {
+      console.error('[Store] Failed to open OneDrive file:', error);
+      get().showToast('error', 'Failed to open file from OneDrive');
+    }
+  },
+
+  setOneDrivePickerOpen: (open: boolean) => {
+    set({ isOneDrivePickerOpen: open });
+  },
 }));
 
 // Initialize on store creation
-useAppStore.getState().checkApiKey();
-useAppStore.getState().checkRagStatus();
-useAppStore.getState().loadPersistedState();
+console.log('[Store] Initializing store...');
+console.log('[Store] window.electronAPI:', typeof window.electronAPI);
 
-// Initialize database and load deals
-window.electronAPI.initDatabase().then(() => {
-  useAppStore.getState().loadDeals();
-});
+try {
+  useAppStore.getState().checkApiKey();
+  useAppStore.getState().checkRagStatus();
+  useAppStore.getState().checkOneDriveStatus();
+  useAppStore.getState().loadPersistedState();
 
-// Listen for chat tool executions to refresh data
-window.electronAPI.onChatToolExecuted((data) => {
-  console.log('Chat tool executed:', data.action);
-  
-  if (data.action === 'deal_activity_created' || data.action === 'deal_stage_updated') {
-    useAppStore.getState().refreshActivities();
+  // Initialize database and load deals
+  if (window.electronAPI) {
+    window.electronAPI.initDatabase().then(() => {
+      useAppStore.getState().loadDeals();
+    }).catch(err => {
+      console.error('[Store] initDatabase error:', err);
+    });
+
+    // Listen for chat tool executions to refresh data
+    window.electronAPI.onChatToolExecuted((data) => {
+      console.log('Chat tool executed:', data.action);
+      
+      if (data.action === 'deal_activity_created' || data.action === 'deal_stage_updated') {
+        useAppStore.getState().refreshActivities();
+      }
+      
+      if (data.action === 'deal_created' || data.action === 'deal_updated') {
+        useAppStore.getState().loadDeals();
+      }
+    });
+  } else {
+    console.error('[Store] window.electronAPI is not defined!');
   }
-  
-  if (data.action === 'deal_created' || data.action === 'deal_updated') {
-    useAppStore.getState().loadDeals();
-  }
-});
+} catch (err) {
+  console.error('[Store] Initialization error:', err);
+}
+
+console.log('[Store] Store initialization complete');

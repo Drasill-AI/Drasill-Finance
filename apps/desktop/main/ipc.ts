@@ -16,10 +16,21 @@ import {
   SchematicToolResponse,
   Deal,
   DealActivity,
+  OneDriveItem,
+  OneDriveAuthStatus,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
-import { indexWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore } from './rag';
+import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady } from './rag';
 import { processSchematicToolCall, getSchematicImage } from './schematic';
+import {
+  startOneDriveAuth,
+  getOneDriveAuthStatus,
+  logoutOneDrive,
+  listOneDriveFolder,
+  readOneDriveFile,
+  downloadOneDriveFile,
+  getOneDriveFolderInfo,
+} from './onedrive';
 import {
   getDatabase,
   createDeal,
@@ -50,6 +61,12 @@ const stateStore = new Store<{ appState: PersistedState }>({
 });
 
 export function setupIpcHandlers(): void {
+  // PDF Extractor Ready signal from renderer
+  ipcMain.on(IPC_CHANNELS.PDF_EXTRACTOR_READY, () => {
+    console.log('[IPC] PDF extractor ready signal received from renderer');
+    setPdfExtractionReady(true);
+  });
+
   // Select workspace folder
   ipcMain.handle(IPC_CHANNELS.SELECT_WORKSPACE, async (): Promise<string | null> => {
     const result = await dialog.showOpenDialog({
@@ -179,6 +196,24 @@ export function setupIpcHandlers(): void {
     }
   });
 
+  // Read Word document from base64 buffer and extract text
+  ipcMain.handle(IPC_CHANNELS.READ_WORD_FILE_BUFFER, async (_event, base64Data: string): Promise<{ content: string }> => {
+    try {
+      const mammoth = await import('mammoth');
+      const buffer = Buffer.from(base64Data, 'base64');
+      const result = await mammoth.extractRawText({ buffer });
+      
+      return {
+        content: result.value,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Failed to read Word file from buffer');
+    }
+  });
+
   // Add files to workspace (copy selected files)
   ipcMain.handle(IPC_CHANNELS.ADD_FILES, async (_event, workspacePath: string): Promise<{ added: number; cancelled: boolean }> => {
     try {
@@ -227,6 +262,59 @@ export function setupIpcHandlers(): void {
       console.error('Failed to add files:', error);
       throw new Error(`Failed to add files: ${error}`);
     }
+  });
+
+  // Delete file
+  ipcMain.handle(IPC_CHANNELS.DELETE_FILE, async (_event, filePath: string): Promise<{ success: boolean }> => {
+    try {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Delete File',
+        message: `Are you sure you want to delete this file?`,
+        detail: filePath,
+        buttons: ['Cancel', 'Delete'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+
+      if (result.response === 1) {
+        await fs.unlink(filePath);
+        return { success: true };
+      }
+      return { success: false };
+    } catch (error) {
+      console.error('Failed to delete file:', error);
+      throw new Error(`Failed to delete file: ${error}`);
+    }
+  });
+
+  // Delete folder
+  ipcMain.handle(IPC_CHANNELS.DELETE_FOLDER, async (_event, folderPath: string): Promise<{ success: boolean }> => {
+    try {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Delete Folder',
+        message: `Are you sure you want to delete this folder and all its contents?`,
+        detail: folderPath,
+        buttons: ['Cancel', 'Delete'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+
+      if (result.response === 1) {
+        await fs.rm(folderPath, { recursive: true, force: true });
+        return { success: true };
+      }
+      return { success: false };
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      throw new Error(`Failed to delete folder: ${error}`);
+    }
+  });
+
+  // Close workspace
+  ipcMain.handle(IPC_CHANNELS.CLOSE_WORKSPACE, async (): Promise<{ success: boolean }> => {
+    return { success: true };
   });
 
   // Get file/directory stats
@@ -279,10 +367,19 @@ export function setupIpcHandlers(): void {
   });
 
   // RAG: Index workspace
-  ipcMain.handle(IPC_CHANNELS.RAG_INDEX_WORKSPACE, async (event, workspacePath: string): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+  ipcMain.handle(IPC_CHANNELS.RAG_INDEX_WORKSPACE, async (event, workspacePath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window) {
-      return await indexWorkspace(workspacePath, window);
+      return await indexWorkspace(workspacePath, window, forceReindex);
+    }
+    return { success: false, chunksIndexed: 0, error: 'No window found' };
+  });
+
+  // RAG: Index OneDrive workspace
+  ipcMain.handle(IPC_CHANNELS.RAG_INDEX_ONEDRIVE, async (event, folderId: string, folderPath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window) {
+      return await indexOneDriveWorkspace(folderId, folderPath, window, forceReindex);
     }
     return { success: false, chunksIndexed: 0, error: 'No window found' };
   });
@@ -345,6 +442,119 @@ export function setupIpcHandlers(): void {
   // Add deal
   ipcMain.handle(IPC_CHANNELS.DEAL_ADD, async (_event, deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>): Promise<Deal> => {
     return createDeal(deal);
+  });
+
+  // Import deals from CSV
+  ipcMain.handle(IPC_CHANNELS.DEAL_IMPORT_CSV, async (): Promise<{ imported: number; errors: string[] }> => {
+    const result = await dialog.showOpenDialog({
+      title: 'Import Deals from CSV',
+      properties: ['openFile'],
+      filters: [
+        { name: 'CSV Files', extensions: ['csv'] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { imported: 0, errors: [] };
+    }
+
+    const filePath = result.filePaths[0];
+    const content = await fs.readFile(filePath, 'utf-8');
+    const lines = content.split(/\r?\n/).filter(line => line.trim());
+    
+    if (lines.length < 2) {
+      return { imported: 0, errors: ['CSV file is empty or has no data rows'] };
+    }
+
+    // Parse header row
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[\s_-]+/g, ''));
+    
+    // Map common header variations to our fields
+    const headerMap: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      if (['borrowername', 'borrower', 'name', 'company', 'client'].includes(h)) headerMap['borrowerName'] = String(i);
+      else if (['borrowercontact', 'contact', 'email', 'phone'].includes(h)) headerMap['borrowerContact'] = String(i);
+      else if (['loanamount', 'loan', 'amount', 'principal', 'value'].includes(h)) headerMap['loanAmount'] = String(i);
+      else if (['interestrate', 'rate', 'interest', 'apr'].includes(h)) headerMap['interestRate'] = String(i);
+      else if (['termmonths', 'term', 'months', 'duration'].includes(h)) headerMap['termMonths'] = String(i);
+      else if (['collateral', 'collateraldescription', 'security'].includes(h)) headerMap['collateralDescription'] = String(i);
+      else if (['stage', 'status'].includes(h)) headerMap['stage'] = String(i);
+      else if (['priority'].includes(h)) headerMap['priority'] = String(i);
+      else if (['assignedto', 'assigned', 'owner', 'lender'].includes(h)) headerMap['assignedTo'] = String(i);
+      else if (['notes', 'comments', 'description'].includes(h)) headerMap['notes'] = String(i);
+      else if (['expectedclosedate', 'closedate', 'duedate', 'expectedclose'].includes(h)) headerMap['expectedCloseDate'] = String(i);
+    });
+
+    if (!headerMap['borrowerName'] && !headerMap['loanAmount']) {
+      return { imported: 0, errors: ['CSV must have at least a "Borrower Name" or "Loan Amount" column'] };
+    }
+
+    const errors: string[] = [];
+    let imported = 0;
+
+    // Process data rows
+    for (let i = 1; i < lines.length; i++) {
+      try {
+        // Parse CSV line (handle quoted fields with commas)
+        const values: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (const char of lines[i]) {
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            values.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        values.push(current.trim());
+
+        const getValue = (field: string): string => {
+          const idx = headerMap[field];
+          return idx !== undefined ? (values[parseInt(idx)] || '') : '';
+        };
+
+        const borrowerName = getValue('borrowerName');
+        const loanAmountStr = getValue('loanAmount').replace(/[$,]/g, '');
+        const loanAmount = parseFloat(loanAmountStr) || 0;
+
+        if (!borrowerName && !loanAmount) {
+          errors.push(`Row ${i + 1}: Missing borrower name and loan amount`);
+          continue;
+        }
+
+        // Validate and map stage
+        let stage = getValue('stage').toLowerCase();
+        const validStages = ['lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined'];
+        if (!validStages.includes(stage)) stage = 'lead';
+
+        // Validate and map priority
+        let priority = getValue('priority').toLowerCase();
+        const validPriorities = ['low', 'medium', 'high'];
+        if (!validPriorities.includes(priority)) priority = 'medium';
+
+        createDeal({
+          borrowerName: borrowerName || 'Unknown',
+          borrowerContact: getValue('borrowerContact') || null,
+          loanAmount,
+          interestRate: parseFloat(getValue('interestRate')) || null,
+          termMonths: parseInt(getValue('termMonths')) || null,
+          collateralDescription: getValue('collateralDescription') || null,
+          stage: stage as any,
+          priority: priority as any,
+          assignedTo: getValue('assignedTo') || null,
+          notes: getValue('notes') || null,
+          expectedCloseDate: getValue('expectedCloseDate') || null,
+        });
+        imported++;
+      } catch (err) {
+        errors.push(`Row ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    }
+
+    return { imported, errors };
   });
 
   // Update deal
@@ -459,4 +669,86 @@ export function setupIpcHandlers(): void {
       }
     }
   );
+
+  // ==========================================
+  // OneDrive Integration
+  // ==========================================
+
+  // Start OneDrive OAuth flow
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_AUTH_START, async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      console.log('[IPC] Starting OneDrive authentication...');
+      const result = await startOneDriveAuth();
+      console.log('[IPC] OneDrive auth result:', result.success);
+      return result;
+    } catch (error) {
+      console.error('[IPC] OneDrive auth error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Get OneDrive authentication status
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_AUTH_STATUS, async (): Promise<OneDriveAuthStatus> => {
+    try {
+      return await getOneDriveAuthStatus();
+    } catch (error) {
+      console.error('[IPC] OneDrive status error:', error);
+      return { isAuthenticated: false };
+    }
+  });
+
+  // Logout from OneDrive
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_LOGOUT, async (): Promise<boolean> => {
+    try {
+      console.log('[IPC] Logging out from OneDrive...');
+      return await logoutOneDrive();
+    } catch (error) {
+      console.error('[IPC] OneDrive logout error:', error);
+      return false;
+    }
+  });
+
+  // List OneDrive folder contents
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_LIST_FOLDER, async (_event, folderId?: string): Promise<OneDriveItem[]> => {
+    try {
+      console.log('[IPC] Listing OneDrive folder:', folderId || 'root');
+      return await listOneDriveFolder(folderId);
+    } catch (error) {
+      console.error('[IPC] OneDrive list folder error:', error);
+      throw error;
+    }
+  });
+
+  // Read OneDrive file content
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_READ_FILE, async (_event, itemId: string): Promise<{ content: string; mimeType: string }> => {
+    try {
+      console.log('[IPC] Reading OneDrive file:', itemId);
+      return await readOneDriveFile(itemId);
+    } catch (error) {
+      console.error('[IPC] OneDrive read file error:', error);
+      throw error;
+    }
+  });
+
+  // Download OneDrive file to local path
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_DOWNLOAD_FILE, async (_event, itemId: string, localPath: string): Promise<{ success: boolean }> => {
+    try {
+      console.log('[IPC] Downloading OneDrive file:', itemId, 'to', localPath);
+      return await downloadOneDriveFile(itemId, localPath);
+    } catch (error) {
+      console.error('[IPC] OneDrive download error:', error);
+      throw error;
+    }
+  });
+
+  // Get OneDrive folder info
+  ipcMain.handle(IPC_CHANNELS.ONEDRIVE_GET_FOLDER_INFO, async (_event, folderId: string): Promise<{ id: string; name: string; path: string }> => {
+    try {
+      console.log('[IPC] Getting OneDrive folder info:', folderId);
+      return await getOneDriveFolderInfo(folderId);
+    } catch (error) {
+      console.error('[IPC] OneDrive folder info error:', error);
+      throw error;
+    }
+  });
 }

@@ -12,3 +12,4 @@ export { BottomPanel } from './BottomPanel';
 export { DealModal } from './DealModal';
 export { ActivityModal } from './ActivityModal';
 export { SchematicViewer } from './SchematicViewer';
+export { OneDrivePicker } from './OneDrivePicker';

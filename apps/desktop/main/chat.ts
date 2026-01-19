@@ -155,6 +155,7 @@ export async function sendChatMessage(
     
     // Send RAG sources to frontend if available (for citation linking)
     if (ragSources.length > 0) {
+      console.log('[Chat] Sending RAG sources to frontend:', JSON.stringify(ragSources, null, 2));
       window.webContents.send(IPC_CHANNELS.CHAT_STREAM_START, {
         messageId,
         ragSources,

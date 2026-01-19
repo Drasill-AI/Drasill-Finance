@@ -24,8 +24,9 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
   const [activities, setActivities] = useState<DealActivity[]>([]);
   const [analytics, setAnalytics] = useState<PipelineAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   
-  const { deals, showToast, setActivityModalOpen, setEditingActivity, activitiesRefreshTrigger } = useAppStore();
+  const { deals, showToast, setActivityModalOpen, setEditingActivity, activitiesRefreshTrigger, loadDeals } = useAppStore();
 
   // Load data when panel opens or deal selection changes
   useEffect(() => {
@@ -92,6 +93,28 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
       hour: 'numeric',
       minute: '2-digit',
     });
+  };
+
+  const handleImportCSV = async () => {
+    setIsImporting(true);
+    try {
+      const result = await window.electronAPI.importDealsFromCSV();
+      if (result.imported > 0) {
+        showToast('success', `Successfully imported ${result.imported} deal${result.imported > 1 ? 's' : ''}`);
+        loadDeals();
+        loadData();
+      } else if (result.errors.length > 0) {
+        showToast('error', result.errors[0]);
+      }
+      // Log any errors to console for debugging
+      if (result.errors.length > 0) {
+        console.warn('CSV Import errors:', result.errors);
+      }
+    } catch (error) {
+      showToast('error', 'Failed to import CSV file');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const getDealName = (dealId: string) => {
@@ -261,6 +284,20 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
             </div>
           ) : (
             <div className={styles.analyticsView}>
+              <div className={styles.analyticsToolbar}>
+                <button 
+                  className={styles.addButton}
+                  onClick={handleImportCSV}
+                  disabled={isImporting}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  {isImporting ? 'Importing...' : 'Import CSV'}
+                </button>
+              </div>
               <div className={styles.analyticsGrid}>
                 {isLoading ? (
                   <div className={styles.emptyState}>

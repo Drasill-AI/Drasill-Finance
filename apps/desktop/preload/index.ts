@@ -12,6 +12,8 @@ import {
   PipelineAnalytics,
   SchematicToolCall,
   SchematicToolResponse,
+  OneDriveItem,
+  OneDriveAuthStatus,
 } from '@drasill/shared';
 
 /**
@@ -54,6 +56,13 @@ const api = {
   },
 
   /**
+   * Read Word document from base64 buffer and extract text
+   */
+  readWordFileBuffer: (base64Data: string): Promise<{ content: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.READ_WORD_FILE_BUFFER, base64Data);
+  },
+
+  /**
    * Get file/directory stats
    */
   stat: (path: string): Promise<FileStat> => {
@@ -65,6 +74,27 @@ const api = {
    */
   addFiles: (workspacePath: string): Promise<{ added: number; cancelled: boolean }> => {
     return ipcRenderer.invoke(IPC_CHANNELS.ADD_FILES, workspacePath);
+  },
+
+  /**
+   * Delete a file
+   */
+  deleteFile: (filePath: string): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DELETE_FILE, filePath);
+  },
+
+  /**
+   * Delete a folder and all its contents
+   */
+  deleteFolder: (folderPath: string): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DELETE_FOLDER, folderPath);
+  },
+
+  /**
+   * Close the current workspace
+   */
+  closeWorkspace: (): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CLOSE_WORKSPACE);
   },
 
   /**
@@ -99,8 +129,8 @@ const api = {
   /**
    * Subscribe to chat stream start (includes RAG sources)
    */
-  onChatStreamStart: (callback: (data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string }> }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string }> }) => callback(data);
+  onChatStreamStart: (callback: (data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string; source?: 'local' | 'onedrive'; oneDriveId?: string }> }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string; source?: 'local' | 'onedrive'; oneDriveId?: string }> }) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_START, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_START, handler);
   },
@@ -165,9 +195,18 @@ const api = {
   // RAG API
   /**
    * Index workspace for RAG
+   * @param forceReindex - If true, re-index even if cache exists
    */
-  indexWorkspace: (workspacePath: string): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.RAG_INDEX_WORKSPACE, workspacePath);
+  indexWorkspace: (workspacePath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RAG_INDEX_WORKSPACE, workspacePath, forceReindex);
+  },
+
+  /**
+   * Index OneDrive workspace for RAG
+   * @param forceReindex - If true, re-index even if cache exists
+   */
+  indexOneDriveWorkspace: (folderId: string, folderPath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RAG_INDEX_ONEDRIVE, folderId, folderPath, forceReindex);
   },
 
   /**
@@ -257,6 +296,13 @@ const api = {
   },
 
   /**
+   * Import deals from CSV file
+   */
+  importDealsFromCSV: (): Promise<{ imported: number; errors: string[] }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_IMPORT_CSV);
+  },
+
+  /**
    * Update deal
    */
   updateDeal: (id: string, deal: Partial<Deal>): Promise<Deal | null> => {
@@ -336,6 +382,86 @@ const api = {
    */
   getSchematicImage: (imagePath: string): Promise<string> => {
     return ipcRenderer.invoke(IPC_CHANNELS.SCHEMATIC_GET_IMAGE, imagePath);
+  },
+
+  // ==========================================
+  // PDF Extraction API (for RAG)
+  // ==========================================
+
+  /**
+   * Signal that the PDF extractor is ready
+   */
+  signalPdfExtractorReady: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.PDF_EXTRACTOR_READY);
+  },
+
+  /**
+   * Listen for PDF extraction requests from main process
+   */
+  onPdfExtractRequest: (callback: (data: { requestId: string; filePath?: string; base64Data?: string; fileName?: string }) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { requestId: string; filePath?: string; base64Data?: string; fileName?: string }) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.PDF_EXTRACT_TEXT_REQUEST, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.PDF_EXTRACT_TEXT_REQUEST, handler);
+  },
+
+  /**
+   * Send PDF extraction result back to main process
+   */
+  sendPdfExtractResult: (data: { requestId: string; text: string; error?: string }): void => {
+    ipcRenderer.send(IPC_CHANNELS.PDF_EXTRACT_TEXT_RESPONSE, data);
+  },
+
+  // ==========================================
+  // OneDrive API
+  // ==========================================
+
+  /**
+   * Start OneDrive OAuth authentication
+   */
+  startOneDriveAuth: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_AUTH_START);
+  },
+
+  /**
+   * Get OneDrive authentication status
+   */
+  getOneDriveAuthStatus: (): Promise<OneDriveAuthStatus> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_AUTH_STATUS);
+  },
+
+  /**
+   * Logout from OneDrive
+   */
+  logoutOneDrive: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_LOGOUT);
+  },
+
+  /**
+   * List OneDrive folder contents
+   */
+  listOneDriveFolder: (folderId?: string): Promise<OneDriveItem[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_LIST_FOLDER, folderId);
+  },
+
+  /**
+   * Read OneDrive file content
+   */
+  readOneDriveFile: (itemId: string): Promise<{ content: string; mimeType: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_READ_FILE, itemId);
+  },
+
+  /**
+   * Download OneDrive file to local path
+   */
+  downloadOneDriveFile: (itemId: string, localPath: string): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_DOWNLOAD_FILE, itemId, localPath);
+  },
+
+  /**
+   * Get OneDrive folder info by ID
+   */
+  getOneDriveFolderInfo: (folderId: string): Promise<{ id: string; name: string; path: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_FOLDER_INFO, folderId);
   },
 };
 

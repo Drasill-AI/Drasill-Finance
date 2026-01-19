@@ -5,12 +5,13 @@ import type {
   ChatRequest, 
   ChatStreamChunk, 
   PersistedState,
-  Equipment,
-  MaintenanceLog,
-  FailureEvent,
-  EquipmentAnalytics,
+  Deal,
+  DealActivity,
+  PipelineAnalytics,
   SchematicToolCall,
   SchematicToolResponse,
+  OneDriveItem,
+  OneDriveAuthStatus,
 } from '@drasill/shared';
 
 interface ElectronAPI {
@@ -19,14 +20,18 @@ interface ElectronAPI {
   readFile: (path: string) => Promise<FileReadResult>;
   readFileBinary: (path: string) => Promise<{ path: string; data: string }>;
   readWordFile: (path: string) => Promise<{ path: string; content: string }>;
+  readWordFileBuffer: (base64Data: string) => Promise<{ content: string }>;
   stat: (path: string) => Promise<FileStat>;
   addFiles: (workspacePath: string) => Promise<{ added: number; cancelled: boolean }>;
+  deleteFile: (filePath: string) => Promise<{ success: boolean }>;
+  deleteFolder: (folderPath: string) => Promise<{ success: boolean }>;
+  closeWorkspace: () => Promise<{ success: boolean }>;
   onMenuOpenWorkspace: (callback: () => void) => () => void;
   onMenuCloseTab: (callback: () => void) => () => void;
   onMenuCommandPalette: (callback: () => void) => () => void;
   // Chat API
   sendChatMessage: (request: ChatRequest) => Promise<void>;
-  onChatStreamStart: (callback: (data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string }> }) => void) => () => void;
+  onChatStreamStart: (callback: (data: { messageId: string; ragSources: Array<{ fileName: string; filePath: string; section: string; source?: 'local' | 'onedrive'; oneDriveId?: string }> }) => void) => () => void;
   onChatStreamChunk: (callback: (chunk: ChatStreamChunk) => void) => () => void;
   onChatStreamEnd: (callback: (data: { id: string; cancelled?: boolean }) => void) => () => void;
   onChatStreamError: (callback: (data: { id?: string; error: string }) => void) => () => void;
@@ -36,6 +41,7 @@ interface ElectronAPI {
   onChatToolExecuted: (callback: (data: { action: string; data: unknown }) => void) => () => void;
   // RAG API
   indexWorkspace: (workspacePath: string) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
+  indexOneDriveWorkspace: (folderId: string, folderPath: string) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
   onRagIndexProgress: (callback: (data: { current: number; total: number; fileName: string; percentage: number }) => void) => () => void;
   onRagIndexComplete: (callback: (data: { chunksIndexed: number; filesIndexed: number; fromCache?: boolean }) => void) => () => void;
   getRagStatus: () => Promise<{ isIndexing: boolean; chunksCount: number; lastUpdated: number | null; workspacePath: string | null }>;
@@ -46,27 +52,37 @@ interface ElectronAPI {
   loadState: () => Promise<PersistedState>;
   // Database
   initDatabase: () => Promise<{ success: boolean; error?: string }>;
-  // Equipment API
-  getAllEquipment: () => Promise<Equipment[]>;
-  getEquipment: (id: string) => Promise<Equipment | null>;
-  addEquipment: (equipment: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Equipment>;
-  updateEquipment: (id: string, equipment: Partial<Equipment>) => Promise<Equipment | null>;
-  deleteEquipment: (id: string) => Promise<boolean>;
-  detectEquipmentFromPath: (filePath: string) => Promise<Equipment | null>;
-  // Maintenance Logs API
-  addMaintenanceLog: (log: Omit<MaintenanceLog, 'id' | 'createdAt'>) => Promise<MaintenanceLog>;
-  getMaintenanceLogs: (limit?: number) => Promise<MaintenanceLog[]>;
-  getMaintenanceLogsByEquipment: (equipmentId: string, limit?: number) => Promise<MaintenanceLog[]>;
-  updateMaintenanceLog: (id: string, data: Partial<Omit<MaintenanceLog, 'id' | 'createdAt'>>) => Promise<MaintenanceLog | null>;
-  deleteMaintenanceLog: (id: string) => Promise<boolean>;
-  // Failure Events API
-  addFailureEvent: (event: Omit<FailureEvent, 'id' | 'createdAt'>) => Promise<FailureEvent>;
-  getFailureEvents: (equipmentId?: string, limit?: number) => Promise<FailureEvent[]>;
-  // Analytics API
-  getEquipmentAnalytics: (equipmentId?: string) => Promise<EquipmentAnalytics[]>;
+  // Deal API
+  getAllDeals: () => Promise<Deal[]>;
+  getDeal: (id: string) => Promise<Deal | null>;
+  addDeal: (deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Deal>;
+  updateDeal: (id: string, deal: Partial<Deal>) => Promise<Deal | null>;
+  deleteDeal: (id: string) => Promise<boolean>;
+  importDealsFromCSV: () => Promise<{ imported: number; errors: string[] }>;
+  detectDealFromPath: (filePath: string) => Promise<Deal | null>;
+  // Deal Activities API
+  addDealActivity: (activity: Omit<DealActivity, 'id' | 'createdAt'>) => Promise<DealActivity>;
+  getActivitiesForDeal: (dealId: string, limit?: number) => Promise<DealActivity[]>;
+  getAllActivities: (limit?: number) => Promise<DealActivity[]>;
+  updateDealActivity: (id: string, data: Partial<Omit<DealActivity, 'id' | 'createdAt'>>) => Promise<DealActivity | null>;
+  deleteDealActivity: (id: string) => Promise<boolean>;
+  // Pipeline Analytics API
+  getPipelineAnalytics: () => Promise<PipelineAnalytics>;
   // Schematics API
   processSchematicToolCall: (toolCall: SchematicToolCall) => Promise<SchematicToolResponse>;
   getSchematicImage: (imagePath: string) => Promise<string>;
+  // PDF Extraction API (for RAG)
+  signalPdfExtractorReady: () => void;
+  onPdfExtractRequest: (callback: (data: { requestId: string; filePath?: string; base64Data?: string; fileName?: string }) => void) => () => void;
+  sendPdfExtractResult: (data: { requestId: string; text: string; error?: string }) => void;
+  // OneDrive API
+  startOneDriveAuth: () => Promise<{ success: boolean; error?: string }>;
+  getOneDriveAuthStatus: () => Promise<OneDriveAuthStatus>;
+  logoutOneDrive: () => Promise<boolean>;
+  listOneDriveFolder: (folderId?: string) => Promise<OneDriveItem[]>;
+  readOneDriveFile: (itemId: string) => Promise<{ content: string; mimeType: string }>;
+  downloadOneDriveFile: (itemId: string, localPath: string) => Promise<{ success: boolean }>;
+  getOneDriveFolderInfo: (folderId: string) => Promise<{ id: string; name: string; path: string }>;
 }
 
 declare global {

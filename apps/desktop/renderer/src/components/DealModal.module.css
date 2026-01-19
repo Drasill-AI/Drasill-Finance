@@ -64,25 +64,42 @@
   flex: 1;
 }
 
+.title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #cccccc);
+}
+
+.title svg {
+  width: 48px;
+  height: 48px;
+  color: var(--text-primary, #cccccc);
+}
+
 .form {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.row {
+.row,
+.formRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
 
-.field {
+.field,
+.formGroup {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.field label {
+.label {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary, #888888);
@@ -90,9 +107,13 @@
   letter-spacing: 0.5px;
 }
 
-.field input,
-.field select,
-.field textarea {
+.required {
+  color: #ef4444;
+}
+
+.input,
+.select,
+.textarea {
   background: var(--bg-primary, #252526);
   border: 1px solid var(--border-color, #3c3c3c);
   border-radius: 4px;
@@ -101,29 +122,58 @@
   color: var(--text-primary, #cccccc);
   outline: none;
   transition: border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.field input:focus,
-.field select:focus,
-.field textarea:focus {
+.input:focus,
+.select:focus,
+.textarea:focus {
   border-color: var(--accent-color, #007acc);
 }
 
-.field textarea {
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-secondary, #888888);
+  opacity: 0.7;
+}
+
+.textarea {
   resize: vertical;
   min-height: 80px;
   font-family: inherit;
 }
 
-.field select {
+.select {
   cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
 }
 
-.actions {
+.select option {
+  background: var(--bg-primary, #252526);
+  color: var(--text-primary, #cccccc);
+}
+
+.footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding: 16px 20px;
+  padding-top: 20px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-color, #3c3c3c);
+}
+
+.actions,
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 20px;
+  margin-top: 10px;
   border-top: 1px solid var(--border-color, #3c3c3c);
 }
 

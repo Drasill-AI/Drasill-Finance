@@ -16,6 +16,10 @@ export interface TreeNode {
   isExpanded?: boolean;
   /** File extension (for files only) */
   extension?: string;
+  /** Source of the file (local filesystem or cloud) */
+  source?: 'local' | 'onedrive';
+  /** OneDrive item ID (for cloud files) */
+  oneDriveId?: string;
 }
 
 /**
@@ -41,6 +45,12 @@ export interface Tab {
   viewState?: unknown;
   /** Schematic data (only for schematic tabs) */
   schematicData?: SchematicData;
+  /** Source of the file (local filesystem or cloud) */
+  source?: 'local' | 'onedrive';
+  /** OneDrive item ID (for cloud files) */
+  oneDriveId?: string;
+  /** Initial page number (for PDF files opened from citations) */
+  initialPage?: number;
 }
 
 /**
@@ -88,6 +98,10 @@ export interface PersistedState {
   activeTabId: string | null;
   sidebarWidth?: number;
   rightPanelWidth?: number;
+  /** Source of the workspace (local or cloud) */
+  workspaceSource?: 'local' | 'onedrive';
+  /** OneDrive folder ID (for cloud workspaces) */
+  oneDriveFolderId?: string;
 }
 
 /**
@@ -99,6 +113,7 @@ export const IPC_CHANNELS = {
   READ_FILE: 'read-file',
   READ_FILE_BINARY: 'read-file-binary',
   READ_WORD_FILE: 'read-word-file',
+  READ_WORD_FILE_BUFFER: 'read-word-file-buffer',
   STAT: 'stat',
   // Chat
   CHAT_SEND_MESSAGE: 'chat-send-message',
@@ -112,12 +127,17 @@ export const IPC_CHANNELS = {
   CHAT_TOOL_EXECUTED: 'chat-tool-executed',
   // RAG
   RAG_INDEX_WORKSPACE: 'rag-index-workspace',
+  RAG_INDEX_ONEDRIVE: 'rag-index-onedrive',
   RAG_INDEX_PROGRESS: 'rag-index-progress',
   RAG_INDEX_COMPLETE: 'rag-index-complete',
   RAG_SEARCH: 'rag-search',
   RAG_GET_STATUS: 'rag-get-status',
   RAG_LOAD_CACHE: 'rag-load-cache',
   RAG_CLEAR: 'rag-clear',
+  // PDF Extraction (IPC between main and renderer)
+  PDF_EXTRACT_TEXT_REQUEST: 'pdf-extract-text-request',
+  PDF_EXTRACT_TEXT_RESPONSE: 'pdf-extract-text-response',
+  PDF_EXTRACTOR_READY: 'pdf-extractor-ready',
   // State persistence
   STATE_SAVE: 'state-save',
   STATE_LOAD: 'state-load',
@@ -127,6 +147,7 @@ export const IPC_CHANNELS = {
   DEAL_ADD: 'deal-add',
   DEAL_UPDATE: 'deal-update',
   DEAL_DELETE: 'deal-delete',
+  DEAL_IMPORT_CSV: 'deal-import-csv',
   DEAL_DETECT_FROM_PATH: 'deal-detect-from-path',
   // Deal Activities
   ACTIVITY_ADD: 'activity-add',
@@ -140,9 +161,20 @@ export const IPC_CHANNELS = {
   DB_INIT: 'db-init',
   // File Operations
   ADD_FILES: 'add-files',
+  DELETE_FILE: 'delete-file',
+  DELETE_FOLDER: 'delete-folder',
+  CLOSE_WORKSPACE: 'close-workspace',
   // Schematics
   SCHEMATIC_PROCESS_TOOL_CALL: 'schematic-process-tool-call',
   SCHEMATIC_GET_IMAGE: 'schematic-get-image',
+  // OneDrive Integration
+  ONEDRIVE_AUTH_START: 'onedrive-auth-start',
+  ONEDRIVE_AUTH_STATUS: 'onedrive-auth-status',
+  ONEDRIVE_LOGOUT: 'onedrive-logout',
+  ONEDRIVE_LIST_FOLDER: 'onedrive-list-folder',
+  ONEDRIVE_READ_FILE: 'onedrive-read-file',
+  ONEDRIVE_DOWNLOAD_FILE: 'onedrive-download-file',
+  ONEDRIVE_GET_FOLDER_INFO: 'onedrive-get-folder-info',
 } as const;
 
 /**
@@ -152,6 +184,11 @@ export interface RAGSource {
   fileName: string;
   filePath: string;
   section: string;
+  pageNumber?: number;
+  /** Source type (local or onedrive) */
+  source?: 'local' | 'onedrive';
+  /** OneDrive item ID for cloud files */
+  oneDriveId?: string;
 }
 
 /**
@@ -478,4 +515,32 @@ export interface SchematicData {
 export interface ProcessSchematicRequest {
   toolCall: SchematicToolCall;
   conversationId?: string;
+}
+
+// ==========================================
+// OneDrive Integration Types
+// ==========================================
+
+/**
+ * OneDrive item (file or folder)
+ */
+export interface OneDriveItem {
+  id: string;
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size?: number;
+  mimeType?: string;
+  webUrl?: string;
+  downloadUrl?: string;
+  lastModified?: string;
+}
+
+/**
+ * OneDrive authentication status
+ */
+export interface OneDriveAuthStatus {
+  isAuthenticated: boolean;
+  userEmail?: string;
+  userName?: string;
 }

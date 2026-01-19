@@ -1,7 +1,183 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { useAppStore } from '../store';
-import { FileContext, RAGSource } from '@drasill/shared';
+import { FileContext, RAGSource, TreeNode } from '@drasill/shared';
 import styles from './RightPanel.module.css';
+import lonnieLogo from '../assets/lonnie.png';
+
+/**
+ * Parse simple markdown-like formatting into React elements
+ */
+function parseMarkdown(text: string): ReactNode[] {
+  const lines = text.split('\n');
+  const elements: ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeContent: string[] = [];
+  let codeLanguage = '';
+  let listItems: string[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+
+  const flushList = () => {
+    if (listItems.length > 0 && listType) {
+      const items = listItems.map((item, i) => (
+        <li key={i}>{formatInlineText(item)}</li>
+      ));
+      if (listType === 'ul') {
+        elements.push(<ul key={elements.length} className={styles.markdownList}>{items}</ul>);
+      } else {
+        elements.push(<ol key={elements.length} className={styles.markdownList}>{items}</ol>);
+      }
+      listItems = [];
+      listType = null;
+    }
+  };
+
+  const formatInlineText = (text: string): ReactNode => {
+    // Bold: **text** or __text__
+    // Italic: *text* or _text_
+    // Inline code: `code`
+    const parts: ReactNode[] = [];
+    let remaining = text;
+    let key = 0;
+
+    while (remaining.length > 0) {
+      // Check for inline code first
+      const codeMatch = remaining.match(/^`([^`]+)`/);
+      if (codeMatch) {
+        parts.push(<code key={key++} className={styles.inlineCode}>{codeMatch[1]}</code>);
+        remaining = remaining.slice(codeMatch[0].length);
+        continue;
+      }
+
+      // Check for bold
+      const boldMatch = remaining.match(/^\*\*(.+?)\*\*/);
+      if (boldMatch) {
+        parts.push(<strong key={key++}>{boldMatch[1]}</strong>);
+        remaining = remaining.slice(boldMatch[0].length);
+        continue;
+      }
+
+      // Check for italic
+      const italicMatch = remaining.match(/^\*(.+?)\*/);
+      if (italicMatch) {
+        parts.push(<em key={key++}>{italicMatch[1]}</em>);
+        remaining = remaining.slice(italicMatch[0].length);
+        continue;
+      }
+
+      // Find next special character
+      const nextSpecial = remaining.search(/[`*]/);
+      if (nextSpecial === -1) {
+        parts.push(remaining);
+        break;
+      } else if (nextSpecial === 0) {
+        // Special char but didn't match pattern, add it literally
+        parts.push(remaining[0]);
+        remaining = remaining.slice(1);
+      } else {
+        parts.push(remaining.slice(0, nextSpecial));
+        remaining = remaining.slice(nextSpecial);
+      }
+    }
+
+    return parts.length === 1 ? parts[0] : <>{parts}</>;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Code block start/end
+    if (line.startsWith('```')) {
+      if (!inCodeBlock) {
+        flushList();
+        inCodeBlock = true;
+        codeLanguage = line.slice(3).trim();
+        codeContent = [];
+      } else {
+        elements.push(
+          <pre key={elements.length} className={styles.codeBlock}>
+            <code className={codeLanguage ? styles[`lang-${codeLanguage}`] : ''}>
+              {codeContent.join('\n')}
+            </code>
+          </pre>
+        );
+        inCodeBlock = false;
+        codeContent = [];
+        codeLanguage = '';
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeContent.push(line);
+      continue;
+    }
+
+    // Headers
+    const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (headerMatch) {
+      flushList();
+      const level = headerMatch[1].length;
+      const content = headerMatch[2];
+      if (level === 1) {
+        elements.push(<h3 key={elements.length} className={styles.markdownH1}>{content}</h3>);
+      } else if (level === 2) {
+        elements.push(<h4 key={elements.length} className={styles.markdownH2}>{content}</h4>);
+      } else {
+        elements.push(<h5 key={elements.length} className={styles.markdownH3}>{content}</h5>);
+      }
+      continue;
+    }
+
+    // Unordered list
+    const ulMatch = line.match(/^[-*]\s+(.+)/);
+    if (ulMatch) {
+      if (listType !== 'ul') flushList();
+      listType = 'ul';
+      listItems.push(ulMatch[1]);
+      continue;
+    }
+
+    // Ordered list
+    const olMatch = line.match(/^\d+\.\s+(.+)/);
+    if (olMatch) {
+      if (listType !== 'ol') flushList();
+      listType = 'ol';
+      listItems.push(olMatch[1]);
+      continue;
+    }
+
+    // Horizontal rule
+    if (line.match(/^---+$/)) {
+      flushList();
+      elements.push(<hr key={elements.length} className={styles.markdownHr} />);
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === '') {
+      flushList();
+      continue;
+    }
+
+    // Regular paragraph
+    flushList();
+    elements.push(<p key={elements.length} className={styles.markdownP}>{formatInlineText(line)}</p>);
+  }
+
+  // Flush any remaining list
+  flushList();
+
+  // If still in code block, close it
+  if (inCodeBlock && codeContent.length > 0) {
+    elements.push(
+      <pre key={elements.length} className={styles.codeBlock}>
+        <code>{codeContent.join('\n')}</code>
+      </pre>
+    );
+  }
+
+  return elements;
+}
 
 export function RightPanel() {
   const [input, setInput] = useState('');
@@ -31,6 +207,7 @@ export function RightPanel() {
     indexWorkspace,
     clearRagIndex,
     openFile,
+    openOneDriveFile,
   } = useAppStore();
 
   // Get current file context - supports multiple files
@@ -130,40 +307,120 @@ export function RightPanel() {
 
   // Helper function to handle citation clicks
   const handleCitationClick = useCallback((source: RAGSource) => {
-    // Extract filename from path for the tab
-    const fileName = source.fileName;
-    openFile(source.filePath, fileName);
-  }, [openFile]);
-
-  // Render message content with clickable citations
-  const renderMessageContent = useCallback((content: string, ragSources?: RAGSource[]) => {
-    if (!ragSources || ragSources.length === 0) {
-      return content;
-    }
-
-    // Parse citations like [[1]], [[2]], etc.
-    const parts = content.split(/(\[\[\d+\]\])/g);
+    console.log('[RightPanel] Citation clicked:', source);
     
-    return parts.map((part, index) => {
-      const match = part.match(/^\[\[(\d+)\]\]$/);
-      if (match) {
-        const sourceIndex = parseInt(match[1], 10) - 1; // 1-indexed in text
+    // Check if this is an OneDrive file
+    if (source.source === 'onedrive' && source.oneDriveId) {
+      console.log('[RightPanel] Opening OneDrive file:', source.oneDriveId, 'page:', source.pageNumber);
+      // Create a TreeNode-like object for openOneDriveFile
+      const ext = source.fileName.split('.').pop()?.toLowerCase() || '';
+      openOneDriveFile({
+        id: source.oneDriveId,
+        name: source.fileName,
+        path: source.filePath,
+        isDirectory: false,
+        extension: ext,
+        source: 'onedrive',
+        oneDriveId: source.oneDriveId,
+      }, source.pageNumber);
+    } else {
+      console.log('[RightPanel] Opening local file:', source.filePath);
+      // Local file - use regular openFile
+      openFile(source.filePath, source.fileName);
+    }
+  }, [openFile, openOneDriveFile]);
+
+  // Render message content with markdown and clickable citations
+  const renderMessageContent = useCallback((content: string, ragSources?: RAGSource[]) => {
+    // First, handle citations if present
+    let processedContent = content;
+    
+    if (ragSources && ragSources.length > 0) {
+      // Replace [[1]], [[2]], or [1], [2] etc. with placeholder markers
+      // We'll render these as clickable links
+      const citationElements: Map<string, ReactNode> = new Map();
+      
+      // Match both [[1]] and [1] formats (but not inside links like [text](url))
+      processedContent = content.replace(/\[\[(\d+)\]\]|\[(\d+)\](?!\()/g, (match, doubleNum, singleNum) => {
+        const num = doubleNum || singleNum;
+        const sourceIndex = parseInt(num, 10) - 1;
         const source = ragSources[sourceIndex];
         if (source) {
-          return (
+          const placeholder = `__CITATION_${num}__`;
+          const clickHandler = (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[RightPanel] Citation button clicked!', num, source);
+            handleCitationClick(source);
+          };
+          citationElements.set(placeholder, (
             <button
-              key={index}
+              key={`citation-${num}`}
               className={styles.citationLink}
-              onClick={() => handleCitationClick(source)}
-              title={`${source.fileName} (${source.section})`}
+              onClick={clickHandler}
+              title={`${source.fileName} (${source.section})${source.source === 'onedrive' ? ' - OneDrive' : ''}`}
+              style={{ cursor: 'pointer' }}
             >
-              [{match[1]}]
+              [{num}]
             </button>
-          );
+          ));
+          return placeholder;
         }
-      }
-      return <span key={index}>{part}</span>;
-    });
+        return match;
+      });
+
+      // Parse markdown then replace citation placeholders
+      const parsed = parseMarkdown(processedContent);
+      
+      // Replace placeholders in parsed content
+      const replacePlaceholders = (node: ReactNode): ReactNode => {
+        if (typeof node === 'string') {
+          const parts: ReactNode[] = [];
+          let remaining = node;
+          let key = 0;
+          
+          while (remaining.length > 0) {
+            const match = remaining.match(/__CITATION_(\d+)__/);
+            if (match && match.index !== undefined) {
+              if (match.index > 0) {
+                parts.push(remaining.slice(0, match.index));
+              }
+              const citation = citationElements.get(match[0]);
+              if (citation) {
+                parts.push(<span key={key++}>{citation}</span>);
+              }
+              remaining = remaining.slice(match.index + match[0].length);
+            } else {
+              parts.push(remaining);
+              break;
+            }
+          }
+          
+          return parts.length === 1 ? parts[0] : <>{parts}</>;
+        }
+        
+        if (Array.isArray(node)) {
+          return node.map((child, i) => <span key={i}>{replacePlaceholders(child)}</span>);
+        }
+        
+        if (React.isValidElement(node)) {
+          const element = node as React.ReactElement<{ children?: ReactNode }>;
+          if (element.props.children) {
+            return React.cloneElement(element, {
+              ...element.props,
+              children: replacePlaceholders(element.props.children)
+            });
+          }
+        }
+        
+        return node;
+      };
+
+      return <div className={styles.markdownContent}>{parsed.map((el, i) => <span key={i}>{replacePlaceholders(el)}</span>)}</div>;
+    }
+
+    // No citations, just parse markdown
+    return <div className={styles.markdownContent}>{parseMarkdown(content)}</div>;
   }, [handleCitationClick]);
 
   // Settings modal
@@ -254,9 +511,14 @@ export function RightPanel() {
         <span className={styles.title}>DEAL ASSISTANT</span>
         <div className={styles.headerActions}>
           {ragChunksCount > 0 && (
-            <span className={styles.ragBadge} title={`${ragChunksCount} chunks indexed`}>
-              📚
-            </span>
+            <button 
+              className={styles.ragBadge} 
+              title={`${ragChunksCount} chunks indexed. Click to re-index.`}
+              onClick={() => indexWorkspace(true)}
+              disabled={isIndexing}
+            >
+              🔄 {ragChunksCount}
+            </button>
           )}
           <button 
             className={styles.settingsButton}
@@ -352,8 +614,8 @@ export function RightPanel() {
       <div className={styles.content}>
         {chatMessages.length === 0 ? (
           <div className={styles.placeholder}>
-            <div className={styles.assistantIcon}>💼</div>
-            <h3>Deal Assistant</h3>
+            <img src={lonnieLogo} alt="Lonnie" className={styles.lonnieIcon} />
+            <h3>Lonnie - Deal Assistant</h3>
             <p>Ask questions about your deals and documents</p>
             {!hasApiKey && (
               <button 
@@ -391,11 +653,11 @@ export function RightPanel() {
                 className={`${styles.message} ${styles[msg.role]}`}
               >
                 <div className={styles.messageHeader}>
-                  {msg.role === 'user' ? '👤 You' : '🤖 Assistant'}
+                  {msg.role === 'user' ? '👤 You' : <><img src={lonnieLogo} alt="Lonnie" className={styles.lonnieAvatar} /> Lonnie</>}
                 </div>
                 <div className={styles.messageContent}>
                   {msg.content ? (
-                    msg.role === 'assistant' && msg.ragSources ? (
+                    msg.role === 'assistant' ? (
                       renderMessageContent(msg.content, msg.ragSources)
                     ) : (
                       msg.content
@@ -412,8 +674,9 @@ export function RightPanel() {
                         key={idx}
                         className={styles.sourceButton}
                         onClick={() => handleCitationClick(source)}
-                        title={source.section}
+                        title={`${source.section}${source.source === 'onedrive' ? ' (OneDrive)' : ''}`}
                       >
+                        {source.source === 'onedrive' && <span className={styles.cloudIcon}>☁️</span>}
                         [{idx + 1}] {source.fileName}
                       </button>
                     ))}

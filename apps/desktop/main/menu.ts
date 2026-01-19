@@ -106,7 +106,7 @@ export function createMenu(mainWindow: BrowserWindow | null): Menu {
       label: 'Help',
       submenu: [
         {
-          label: 'About Drasill Cloud',
+          label: 'About Drasill Finance',
           click: () => {
             mainWindow?.webContents.send('menu:about');
           },

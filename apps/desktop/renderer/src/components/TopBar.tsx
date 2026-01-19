@@ -7,14 +7,14 @@ export function TopBar() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   
   const { 
-    equipment, 
-    selectedEquipmentId, 
-    setSelectedEquipment,
-    detectedEquipment,
-    setEquipmentModalOpen,
+    deals, 
+    selectedDealId, 
+    setSelectedDeal,
+    detectedDeal,
+    setDealModalOpen,
   } = useAppStore();
 
-  const selectedEquipment = equipment.find(eq => eq.id === selectedEquipmentId);
+  const selectedDeal = deals?.find(d => d.id === selectedDealId);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -27,21 +27,27 @@ export function TopBar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Mock health score for demo - in real app, this would come from analytics
-  const getEquipmentHealth = (id: string | undefined) => {
-    if (!id) return 'healthy';
-    // Simple mock based on ID hash - replace with real analytics
-    const hash = id.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-    const score = 70 + (hash % 30);
-    if (score >= 80) return 'healthy';
-    if (score >= 50) return 'warning';
-    return 'critical';
+  // Get deal stage color
+  const getDealStageColor = (stage: string | undefined) => {
+    if (!stage) return 'healthy';
+    switch (stage) {
+      case 'funded':
+      case 'closed':
+        return 'healthy';
+      case 'approved':
+      case 'underwriting':
+        return 'warning';
+      case 'declined':
+        return 'critical';
+      default:
+        return 'healthy';
+    }
   };
 
   return (
     <div className={styles.topBar}>
       <div className={styles.leftSection}>
-        <span className={styles.label}>Equipment</span>
+        <span className={styles.label}>Deal</span>
         
         <div className={styles.equipmentDropdown} ref={dropdownRef}>
           <button 
@@ -49,13 +55,16 @@ export function TopBar() {
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
           >
             <svg className={styles.equipmentIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
             </svg>
             <span>
-              {selectedEquipment 
-                ? `${selectedEquipment.make} ${selectedEquipment.model}`
-                : 'Select Equipment'
+              {selectedDeal 
+                ? `${selectedDeal.borrowerName} - ${selectedDeal.dealNumber}`
+                : 'Select Deal'
               }
             </span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -66,11 +75,11 @@ export function TopBar() {
           {isDropdownOpen && (
             <div className={styles.dropdownMenu}>
               <div className={styles.dropdownHeader}>
-                <span className={styles.dropdownTitle}>Equipment List</span>
+                <span className={styles.dropdownTitle}>Deal List</span>
                 <button 
                   className={styles.addEquipmentButton}
                   onClick={() => {
-                    setEquipmentModalOpen(true);
+                    setDealModalOpen(true);
                     setIsDropdownOpen(false);
                   }}
                 >
@@ -83,17 +92,17 @@ export function TopBar() {
               </div>
 
               <div className={styles.dropdownList}>
-                {equipment.length === 0 ? (
+                {!deals || deals.length === 0 ? (
                   <div className={styles.emptyState}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
                     </svg>
-                    <p>No equipment registered</p>
+                    <p>No deals registered</p>
                     <button 
                       className={styles.manageButton}
                       onClick={() => {
-                        setEquipmentModalOpen(true);
+                        setDealModalOpen(true);
                         setIsDropdownOpen(false);
                       }}
                     >
@@ -101,29 +110,27 @@ export function TopBar() {
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      Add Equipment
+                      Add Deal
                     </button>
                   </div>
                 ) : (
-                  equipment.map(eq => (
+                  deals.map(deal => (
                     <button
-                      key={eq.id}
-                      className={`${styles.equipmentItem} ${selectedEquipmentId === eq.id ? styles.selected : ''}`}
+                      key={deal.id}
+                      className={`${styles.equipmentItem} ${selectedDealId === deal.id ? styles.selected : ''}`}
                       onClick={() => {
-                        setSelectedEquipment(eq.id ?? null);
+                        setSelectedDeal(deal.id ?? null);
                         setIsDropdownOpen(false);
                       }}
                     >
-                      <div className={`${styles.equipmentStatus} ${styles[getEquipmentHealth(eq.id)]}`} />
+                      <div className={`${styles.equipmentStatus} ${styles[getDealStageColor(deal.stage)]}`} />
                       <div className={styles.equipmentDetails}>
                         <div className={styles.equipmentMakeModel}>
-                          {eq.make} {eq.model}
+                          {deal.borrowerName}
                         </div>
-                        {eq.serialNumber && (
-                          <div className={styles.equipmentSerial}>SN: {eq.serialNumber}</div>
-                        )}
+                        <div className={styles.equipmentSerial}>{deal.dealNumber} • {deal.stage}</div>
                       </div>
-                      {detectedEquipment?.id === eq.id && (
+                      {detectedDeal?.id === deal.id && (
                         <span className={styles.detectedBadge}>Detected</span>
                       )}
                     </button>
@@ -134,11 +141,11 @@ export function TopBar() {
           )}
         </div>
 
-        {detectedEquipment && detectedEquipment.id !== selectedEquipmentId && (
+        {detectedDeal && detectedDeal.id !== selectedDealId && (
           <button
             className={styles.iconButton}
-            onClick={() => setSelectedEquipment(detectedEquipment.id ?? null)}
-            title={`Detected: ${detectedEquipment.make} ${detectedEquipment.model}`}
+            onClick={() => setSelectedDeal(detectedDeal.id ?? null)}
+            title={`Detected: ${detectedDeal.borrowerName}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
@@ -151,8 +158,8 @@ export function TopBar() {
       <div className={styles.rightSection}>
         <button
           className={styles.iconButton}
-          onClick={() => setEquipmentModalOpen(true)}
-          title="Manage Equipment"
+          onClick={() => setDealModalOpen(true)}
+          title="Manage Deals"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
