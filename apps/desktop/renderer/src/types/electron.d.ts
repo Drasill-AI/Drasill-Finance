@@ -12,6 +12,10 @@ import type {
   SchematicToolResponse,
   OneDriveItem,
   OneDriveAuthStatus,
+  ChatSession,
+  ChatSessionFull,
+  ChatMessage,
+  ChatSessionSource,
 } from '@drasill/shared';
 
 interface ElectronAPI {
@@ -87,6 +91,24 @@ interface ElectronAPI {
   readOneDriveFile: (itemId: string) => Promise<{ content: string; mimeType: string }>;
   downloadOneDriveFile: (itemId: string, localPath: string) => Promise<{ success: boolean }>;
   getOneDriveFolderInfo: (folderId: string) => Promise<{ id: string; name: string; path: string }>;
+  // Chat History API
+  createChatSession: (data: {
+    title?: string;
+    dealId?: string;
+    dealName?: string;
+    sources?: ChatSessionSource[];
+    firstMessage?: string;
+  }) => Promise<ChatSession>;
+  updateChatSession: (id: string, data: Partial<{
+    title: string;
+    dealId: string | null;
+    dealName: string | null;
+    sources: ChatSessionSource[];
+  }>) => Promise<ChatSession | null>;
+  deleteChatSession: (id: string) => Promise<boolean>;
+  getChatSession: (id: string) => Promise<ChatSessionFull | null>;
+  getAllChatSessions: () => Promise<ChatSession[]>;
+  addChatMessage: (sessionId: string, message: ChatMessage) => Promise<ChatMessage>;
 }
 
 declare global {

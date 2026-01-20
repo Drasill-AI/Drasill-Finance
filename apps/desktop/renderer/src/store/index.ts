@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Deal, DealActivity, BottomPanelState, SchematicToolCall, SchematicData, OneDriveAuthStatus, OneDriveItem } from '@drasill/shared';
+import { Tab, TreeNode, getFileType, ChatMessage, FileContext, PersistedState, Deal, DealActivity, BottomPanelState, SchematicToolCall, SchematicData, OneDriveAuthStatus, OneDriveItem, ChatSession, ChatSessionFull, ChatSessionSource } from '@drasill/shared';
 
 interface ToastMessage {
   id: string;
@@ -18,6 +18,11 @@ interface AppState {
   isChatLoading: boolean;
   chatError: string | null;
   hasApiKey: boolean;
+  
+  // Chat History
+  chatSessions: ChatSession[];
+  currentSessionId: string | null;
+  isHistoryOpen: boolean;
 
   // RAG
   isIndexing: boolean;
@@ -88,6 +93,14 @@ interface AppState {
   sendMessage: (content: string, fileContext?: FileContext) => Promise<void>;
   clearChat: () => void;
   cancelChat: () => void;
+  
+  // Chat History actions
+  loadChatSessions: () => Promise<void>;
+  startNewSession: (dealId?: string, dealName?: string) => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  toggleHistory: () => void;
+  updateSessionSources: (sources: ChatSessionSource[]) => Promise<void>;
 
   // RAG actions
   indexWorkspace: (forceReindex?: boolean) => Promise<void>;
@@ -146,6 +159,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   isChatLoading: false,
   chatError: null,
   hasApiKey: false,
+  
+  // Chat History state
+  chatSessions: [],
+  currentSessionId: null,
+  isHistoryOpen: false,
 
   // RAG state
   isIndexing: false,
@@ -584,12 +602,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   sendMessage: async (content: string, fileContext?: FileContext) => {
+    // Auto-create session if needed
+    let { currentSessionId, detectedDeal } = get();
+    if (!currentSessionId) {
+      try {
+        const session = await window.electronAPI.createChatSession({
+          dealId: detectedDeal?.id,
+          dealName: detectedDeal?.borrowerName,
+          firstMessage: content.slice(0, 100),
+        });
+        currentSessionId = session.id;
+        set((state) => ({
+          currentSessionId: session.id,
+          chatSessions: [session, ...state.chatSessions],
+        }));
+      } catch (error) {
+        console.error('Failed to create chat session:', error);
+      }
+    }
+
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
       timestamp: Date.now(),
     };
+
+    // Save user message to database
+    if (currentSessionId) {
+      try {
+        await window.electronAPI.addChatMessage(currentSessionId, userMessage);
+      } catch (error) {
+        console.error('Failed to save user message:', error);
+      }
+    }
 
     set((state) => ({
       chatMessages: [...state.chatMessages, userMessage],
@@ -623,6 +669,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
           return { chatMessages: messages };
         });
+        
+        // Update session sources
+        const sources: ChatSessionSource[] = data.ragSources.map(s => ({
+          type: 'document' as const,
+          name: s.fileName,
+          path: s.filePath,
+          oneDriveId: s.oneDriveId,
+        }));
+        get().updateSessionSources(sources);
       }
     });
 
@@ -640,12 +695,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     });
 
-    const removeEndListener = window.electronAPI.onChatStreamEnd(() => {
+    const removeEndListener = window.electronAPI.onChatStreamEnd(async () => {
       set({ isChatLoading: false });
       removeStartListener();
       removeChunkListener();
       removeEndListener();
       removeErrorListener();
+      
+      // Save assistant message to database
+      const finalMessages = get().chatMessages;
+      const finalAssistant = finalMessages.find(m => m.id === assistantMessage.id);
+      if (finalAssistant && currentSessionId) {
+        try {
+          await window.electronAPI.addChatMessage(currentSessionId, finalAssistant);
+          // Refresh sessions to update message count
+          get().loadChatSessions();
+        } catch (error) {
+          console.error('Failed to save assistant message:', error);
+        }
+      }
     });
 
     const removeErrorListener = window.electronAPI.onChatStreamError((data) => {
@@ -681,12 +749,92 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearChat: () => {
-    set({ chatMessages: [], chatError: null });
+    set({ chatMessages: [], chatError: null, currentSessionId: null });
   },
 
   cancelChat: () => {
     window.electronAPI.cancelChat();
     set({ isChatLoading: false });
+  },
+
+  // Chat History actions
+  loadChatSessions: async () => {
+    try {
+      const sessions = await window.electronAPI.getAllChatSessions();
+      set({ chatSessions: sessions });
+    } catch (error) {
+      console.error('Failed to load chat sessions:', error);
+    }
+  },
+
+  startNewSession: async (dealId?: string, dealName?: string) => {
+    try {
+      const session = await window.electronAPI.createChatSession({
+        dealId,
+        dealName,
+      });
+      set((state) => ({
+        chatSessions: [session, ...state.chatSessions],
+        currentSessionId: session.id,
+        chatMessages: [],
+        chatError: null,
+      }));
+    } catch (error) {
+      get().showToast('error', 'Failed to start new chat session');
+    }
+  },
+
+  loadSession: async (sessionId: string) => {
+    try {
+      const session = await window.electronAPI.getChatSession(sessionId);
+      if (session) {
+        set({
+          currentSessionId: session.id,
+          chatMessages: session.messages,
+          chatError: null,
+          isHistoryOpen: false,
+        });
+      }
+    } catch (error) {
+      get().showToast('error', 'Failed to load chat session');
+    }
+  },
+
+  deleteSession: async (sessionId: string) => {
+    try {
+      const success = await window.electronAPI.deleteChatSession(sessionId);
+      if (success) {
+        set((state) => ({
+          chatSessions: state.chatSessions.filter(s => s.id !== sessionId),
+          // Clear current session if it was deleted
+          currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
+          chatMessages: state.currentSessionId === sessionId ? [] : state.chatMessages,
+        }));
+        get().showToast('success', 'Chat deleted');
+      }
+    } catch (error) {
+      get().showToast('error', 'Failed to delete chat session');
+    }
+  },
+
+  toggleHistory: () => {
+    set((state) => ({ isHistoryOpen: !state.isHistoryOpen }));
+  },
+
+  updateSessionSources: async (sources: ChatSessionSource[]) => {
+    const { currentSessionId } = get();
+    if (!currentSessionId) return;
+    
+    try {
+      await window.electronAPI.updateChatSession(currentSessionId, { sources });
+      set((state) => ({
+        chatSessions: state.chatSessions.map(s => 
+          s.id === currentSessionId ? { ...s, sources } : s
+        ),
+      }));
+    } catch (error) {
+      console.error('Failed to update session sources:', error);
+    }
   },
 
   // RAG actions

@@ -18,6 +18,10 @@ import {
   DealActivity,
   OneDriveItem,
   OneDriveAuthStatus,
+  ChatSession,
+  ChatSessionFull,
+  ChatMessage,
+  ChatSessionSource,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
 import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady } from './rag';
@@ -44,6 +48,12 @@ import {
   getActivitiesForDeal,
   getAllActivities,
   calculatePipelineAnalytics,
+  createChatSession,
+  getChatSessionFull,
+  getAllChatSessions,
+  updateChatSession,
+  deleteChatSession,
+  addChatMessage,
 } from './database';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for reading files
@@ -888,6 +898,87 @@ export function setupIpcHandlers(): void {
       return await getOneDriveFolderInfo(folderId);
     } catch (error) {
       console.error('[IPC] OneDrive folder info error:', error);
+      throw error;
+    }
+  });
+
+  // ==========================================
+  // Chat History
+  // ==========================================
+
+  // Create new chat session
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_CREATE, async (_event, data: {
+    title?: string;
+    dealId?: string;
+    dealName?: string;
+    sources?: ChatSessionSource[];
+    firstMessage?: string;
+  }): Promise<ChatSession> => {
+    try {
+      console.log('[IPC] Creating chat session:', data);
+      return createChatSession(data);
+    } catch (error) {
+      console.error('[IPC] Create chat session error:', error);
+      throw error;
+    }
+  });
+
+  // Update chat session
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_UPDATE, async (_event, id: string, data: Partial<{
+    title: string;
+    dealId: string | null;
+    dealName: string | null;
+    sources: ChatSessionSource[];
+  }>): Promise<ChatSession | null> => {
+    try {
+      console.log('[IPC] Updating chat session:', id, data);
+      return updateChatSession(id, data);
+    } catch (error) {
+      console.error('[IPC] Update chat session error:', error);
+      throw error;
+    }
+  });
+
+  // Delete chat session
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_DELETE, async (_event, id: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Deleting chat session:', id);
+      return deleteChatSession(id);
+    } catch (error) {
+      console.error('[IPC] Delete chat session error:', error);
+      throw error;
+    }
+  });
+
+  // Get chat session with messages
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_GET, async (_event, id: string): Promise<ChatSessionFull | null> => {
+    try {
+      console.log('[IPC] Getting chat session:', id);
+      return getChatSessionFull(id);
+    } catch (error) {
+      console.error('[IPC] Get chat session error:', error);
+      throw error;
+    }
+  });
+
+  // Get all chat sessions
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_GET_ALL, async (): Promise<ChatSession[]> => {
+    try {
+      console.log('[IPC] Getting all chat sessions');
+      return getAllChatSessions();
+    } catch (error) {
+      console.error('[IPC] Get all chat sessions error:', error);
+      throw error;
+    }
+  });
+
+  // Add message to chat session
+  ipcMain.handle(IPC_CHANNELS.CHAT_SESSION_ADD_MESSAGE, async (_event, sessionId: string, message: ChatMessage): Promise<ChatMessage> => {
+    try {
+      console.log('[IPC] Adding message to session:', sessionId);
+      return addChatMessage(sessionId, message);
+    } catch (error) {
+      console.error('[IPC] Add chat message error:', error);
       throw error;
     }
   });

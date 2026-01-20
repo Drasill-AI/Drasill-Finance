@@ -29,6 +29,42 @@
   gap: 8px;
 }
 
+.historyButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  opacity: 0.5;
+  transition: all 0.15s ease;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.historyButton:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+.historyButton.active {
+  opacity: 1;
+  background: var(--accent-color);
+  color: white;
+}
+
+.historyPanel {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-primary);
+  z-index: 100;
+  border-top: 1px solid var(--border-color);
+}
+
 .ragBadge {
   font-size: 10px;
   opacity: 0.7;
@@ -522,7 +558,8 @@
 }
 
 .clearButton,
-.cancelButton {
+.cancelButton,
+.newChatButton {
   padding: 6px 14px;
   font-size: 12px;
   border-radius: 5px;
@@ -534,6 +571,17 @@
   background-color: var(--bg-tertiary);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
+}
+
+.newChatButton {
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+}
+
+.newChatButton:hover {
+  background-color: var(--accent);
+  filter: brightness(1.1);
 }
 
 .clearButton:hover {

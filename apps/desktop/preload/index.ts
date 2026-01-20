@@ -14,6 +14,10 @@ import {
   SchematicToolResponse,
   OneDriveItem,
   OneDriveAuthStatus,
+  ChatSession,
+  ChatSessionFull,
+  ChatMessage,
+  ChatSessionSource,
 } from '@drasill/shared';
 
 /**
@@ -490,6 +494,63 @@ const api = {
    */
   getOneDriveFolderInfo: (folderId: string): Promise<{ id: string; name: string; path: string }> => {
     return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_FOLDER_INFO, folderId);
+  },
+
+  // ==========================================
+  // Chat History API
+  // ==========================================
+
+  /**
+   * Create a new chat session
+   */
+  createChatSession: (data: {
+    title?: string;
+    dealId?: string;
+    dealName?: string;
+    sources?: ChatSessionSource[];
+    firstMessage?: string;
+  }): Promise<ChatSession> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_CREATE, data);
+  },
+
+  /**
+   * Update a chat session
+   */
+  updateChatSession: (id: string, data: Partial<{
+    title: string;
+    dealId: string | null;
+    dealName: string | null;
+    sources: ChatSessionSource[];
+  }>): Promise<ChatSession | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_UPDATE, id, data);
+  },
+
+  /**
+   * Delete a chat session
+   */
+  deleteChatSession: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_DELETE, id);
+  },
+
+  /**
+   * Get a chat session with all messages
+   */
+  getChatSession: (id: string): Promise<ChatSessionFull | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_GET, id);
+  },
+
+  /**
+   * Get all chat sessions (without messages)
+   */
+  getAllChatSessions: (): Promise<ChatSession[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_GET_ALL);
+  },
+
+  /**
+   * Add a message to a chat session
+   */
+  addChatMessage: (sessionId: string, message: ChatMessage): Promise<ChatMessage> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_ADD_MESSAGE, sessionId, message);
   },
 };
 

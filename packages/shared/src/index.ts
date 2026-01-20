@@ -179,6 +179,13 @@ export const IPC_CHANNELS = {
   ONEDRIVE_READ_FILE: 'onedrive-read-file',
   ONEDRIVE_DOWNLOAD_FILE: 'onedrive-download-file',
   ONEDRIVE_GET_FOLDER_INFO: 'onedrive-get-folder-info',
+  // Chat History
+  CHAT_SESSION_CREATE: 'chat-session-create',
+  CHAT_SESSION_UPDATE: 'chat-session-update',
+  CHAT_SESSION_DELETE: 'chat-session-delete',
+  CHAT_SESSION_GET: 'chat-session-get',
+  CHAT_SESSION_GET_ALL: 'chat-session-get-all',
+  CHAT_SESSION_ADD_MESSAGE: 'chat-session-add-message',
 } as const;
 
 /**
@@ -547,4 +554,40 @@ export interface OneDriveAuthStatus {
   isAuthenticated: boolean;
   userEmail?: string;
   userName?: string;
+}
+
+// ==========================================
+// Chat History Types
+// ==========================================
+
+/**
+ * Source referenced in a chat session
+ */
+export interface ChatSessionSource {
+  type: 'document' | 'deal' | 'schematic';
+  name: string;
+  path?: string;
+  oneDriveId?: string;
+}
+
+/**
+ * Chat session for history
+ */
+export interface ChatSession {
+  id: string;
+  title: string;
+  dealId?: string;
+  dealName?: string;
+  sources: ChatSessionSource[];
+  messageCount: number;
+  firstMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Full chat session with messages
+ */
+export interface ChatSessionFull extends ChatSession {
+  messages: ChatMessage[];
 }

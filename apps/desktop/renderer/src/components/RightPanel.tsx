@@ -3,6 +3,7 @@ import { useAppStore } from '../store';
 import { FileContext, RAGSource, TreeNode } from '@drasill/shared';
 import styles from './RightPanel.module.css';
 import lonnieLogo from '../assets/lonnie.png';
+import { ChatHistory } from './ChatHistory';
 
 /**
  * Parse simple markdown-like formatting into React elements
@@ -208,7 +209,16 @@ export function RightPanel() {
     clearRagIndex,
     openFile,
     openOneDriveFile,
+    isHistoryOpen,
+    toggleHistory,
+    currentSessionId,
+    loadChatSessions,
   } = useAppStore();
+
+  // Load chat sessions on mount
+  useEffect(() => {
+    loadChatSessions();
+  }, [loadChatSessions]);
 
   // Get current file context - supports multiple files
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -510,6 +520,16 @@ export function RightPanel() {
       <div className={styles.header}>
         <span className={styles.title}>DEAL ASSISTANT</span>
         <div className={styles.headerActions}>
+          <button 
+            className={`${styles.historyButton} ${isHistoryOpen ? styles.active : ''}`}
+            onClick={toggleHistory}
+            title="Chat History"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </button>
           {ragChunksCount > 0 && (
             <button 
               className={styles.ragBadge} 
@@ -533,6 +553,13 @@ export function RightPanel() {
           </button>
         </div>
       </div>
+
+      {/* Chat History Panel */}
+      {isHistoryOpen && (
+        <div className={styles.historyPanel}>
+          <ChatHistory onClose={toggleHistory} />
+        </div>
+      )}
 
       {/* Indexing progress */}
       {isIndexing && indexingProgress && (
@@ -698,11 +725,12 @@ export function RightPanel() {
       {chatMessages.length > 0 && (
         <div className={styles.actionBar}>
           <button 
-            className={styles.clearButton}
+            className={styles.newChatButton}
             onClick={clearChat}
             disabled={isChatLoading}
+            title="Start new chat"
           >
-            Clear Chat
+            + New Chat
           </button>
           {isChatLoading && (
             <button 

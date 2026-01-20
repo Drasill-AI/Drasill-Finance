@@ -6,7 +6,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
-import type { Deal, DealActivity, DealStage, DealActivityType, PipelineAnalytics } from '@drasill/shared';
+import type { Deal, DealActivity, DealStage, DealActivityType, PipelineAnalytics, ChatSession, ChatSessionFull, ChatMessage, ChatSessionSource } from '@drasill/shared';
 
 let db: Database.Database | null = null;
 
@@ -94,6 +94,37 @@ function initializeSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_deals_borrower ON deals(borrower_name);
     CREATE INDEX IF NOT EXISTS idx_activities_deal ON deal_activities(deal_id);
     CREATE INDEX IF NOT EXISTS idx_activities_type ON deal_activities(type);
+
+    -- Chat sessions table
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      deal_id TEXT,
+      deal_name TEXT,
+      sources TEXT DEFAULT '[]',
+      message_count INTEGER DEFAULT 0,
+      first_message TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE SET NULL
+    );
+
+    -- Chat messages table
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+      content TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      rag_sources TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    -- Chat session indexes
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_deal ON chat_sessions(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
   `);
 }
 
@@ -456,5 +487,204 @@ function mapRowToActivity(row: any): DealActivity {
     performedBy: row.performed_by,
     performedAt: row.performed_at,
     createdAt: row.created_at
+  };
+}
+
+// =============================================================================
+// CHAT SESSION OPERATIONS
+// =============================================================================
+
+/**
+ * Create a new chat session
+ */
+export function createChatSession(data: {
+  title?: string;
+  dealId?: string;
+  dealName?: string;
+  sources?: ChatSessionSource[];
+  firstMessage?: string;
+}): ChatSession {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  const now = new Date().toISOString();
+  const title = data.title || 'New Chat';
+  const sources = JSON.stringify(data.sources || []);
+  
+  const stmt = db.prepare(`
+    INSERT INTO chat_sessions (id, title, deal_id, deal_name, sources, message_count, first_message, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+  `);
+  
+  stmt.run(id, title, data.dealId || null, data.dealName || null, sources, data.firstMessage || null, now, now);
+  
+  return getChatSession(id)!;
+}
+
+/**
+ * Get a chat session by ID (without messages)
+ */
+export function getChatSession(id: string): ChatSession | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  
+  return mapRowToChatSession(row);
+}
+
+/**
+ * Get a chat session with all messages
+ */
+export function getChatSessionFull(id: string): ChatSessionFull | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const session = getChatSession(id);
+  if (!session) return null;
+  
+  const messages = getChatSessionMessages(id);
+  
+  return { ...session, messages };
+}
+
+/**
+ * Get all chat sessions (without messages)
+ */
+export function getAllChatSessions(): ChatSession[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM chat_sessions ORDER BY updated_at DESC').all() as any[];
+  return rows.map(mapRowToChatSession);
+}
+
+/**
+ * Update a chat session
+ */
+export function updateChatSession(id: string, data: Partial<{
+  title: string;
+  dealId: string | null;
+  dealName: string | null;
+  sources: ChatSessionSource[];
+}>): ChatSession | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const existing = getChatSession(id);
+  if (!existing) return null;
+  
+  const now = new Date().toISOString();
+  const updates: string[] = ['updated_at = ?'];
+  const values: any[] = [now];
+  
+  if (data.title !== undefined) {
+    updates.push('title = ?');
+    values.push(data.title);
+  }
+  if (data.dealId !== undefined) {
+    updates.push('deal_id = ?');
+    values.push(data.dealId);
+  }
+  if (data.dealName !== undefined) {
+    updates.push('deal_name = ?');
+    values.push(data.dealName);
+  }
+  if (data.sources !== undefined) {
+    updates.push('sources = ?');
+    values.push(JSON.stringify(data.sources));
+  }
+  
+  values.push(id);
+  
+  db.prepare(`UPDATE chat_sessions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  
+  return getChatSession(id);
+}
+
+/**
+ * Delete a chat session and all its messages
+ */
+export function deleteChatSession(id: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM chat_sessions WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Add a message to a chat session
+ */
+export function addChatMessage(sessionId: string, message: ChatMessage): ChatMessage {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = message.id || generateId();
+  const ragSources = JSON.stringify(message.ragSources || []);
+  
+  const stmt = db.prepare(`
+    INSERT INTO chat_messages (id, session_id, role, content, timestamp, rag_sources)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(id, sessionId, message.role, message.content, message.timestamp, ragSources);
+  
+  // Update session message count and first message if needed
+  const session = getChatSession(sessionId);
+  if (session) {
+    const updateStmt = db.prepare(`
+      UPDATE chat_sessions 
+      SET message_count = message_count + 1,
+          first_message = COALESCE(first_message, ?),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `);
+    updateStmt.run(message.role === 'user' ? message.content.slice(0, 100) : null, sessionId);
+  }
+  
+  return { ...message, id };
+}
+
+/**
+ * Get all messages for a chat session
+ */
+export function getChatSessionMessages(sessionId: string): ChatMessage[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
+  return rows.map(mapRowToChatMessage);
+}
+
+/**
+ * Generate title from first message using simple extraction
+ */
+export function generateSessionTitle(firstMessage: string): string {
+  // Take first 50 chars, trim, and add ellipsis if needed
+  const cleaned = firstMessage.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= 50) return cleaned;
+  return cleaned.slice(0, 47) + '...';
+}
+
+// =============================================================================
+// CHAT SESSION HELPERS
+// =============================================================================
+
+function mapRowToChatSession(row: any): ChatSession {
+  return {
+    id: row.id,
+    title: row.title,
+    dealId: row.deal_id,
+    dealName: row.deal_name,
+    sources: JSON.parse(row.sources || '[]'),
+    messageCount: row.message_count,
+    firstMessage: row.first_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapRowToChatMessage(row: any): ChatMessage {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    timestamp: row.timestamp,
+    ragSources: JSON.parse(row.rag_sources || '[]')
   };
 }
