@@ -97,5 +97,31 @@
 .contextMenuItem svg {
   width: 16px;
   height: 16px;
+  color: var(--text-muted, #8b8b8b);
+}
+
+.contextMenuItem:last-child svg {
   color: var(--error, #F87171);
 }
+
+.contextMenuDivider {
+  height: 1px;
+  background: var(--border-color, rgba(255, 255, 255, 0.1));
+  margin: 4px 8px;
+}
+
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--bg-primary, #0d0d0d);
+  border: 1px solid var(--accent, #3B82F6);
+  border-radius: 4px;
+  color: var(--text-primary, #e6e6e6);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.renameInput::placeholder {
+  color: var(--text-muted, #8b8b8b);}

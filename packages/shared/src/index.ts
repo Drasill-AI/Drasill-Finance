@@ -148,6 +148,7 @@ export const IPC_CHANNELS = {
   DEAL_UPDATE: 'deal-update',
   DEAL_DELETE: 'deal-delete',
   DEAL_IMPORT_CSV: 'deal-import-csv',
+  DEAL_EXPORT_CSV: 'deal-export-csv',
   DEAL_DETECT_FROM_PATH: 'deal-detect-from-path',
   // Deal Activities
   ACTIVITY_ADD: 'activity-add',
@@ -163,6 +164,9 @@ export const IPC_CHANNELS = {
   ADD_FILES: 'add-files',
   DELETE_FILE: 'delete-file',
   DELETE_FOLDER: 'delete-folder',
+  CREATE_FILE: 'create-file',
+  CREATE_FOLDER: 'create-folder',
+  RENAME_FILE: 'rename-file',
   CLOSE_WORKSPACE: 'close-workspace',
   // Schematics
   SCHEMATIC_PROCESS_TOOL_CALL: 'schematic-process-tool-call',

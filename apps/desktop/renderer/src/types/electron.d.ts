@@ -25,6 +25,9 @@ interface ElectronAPI {
   addFiles: (workspacePath: string) => Promise<{ added: number; cancelled: boolean }>;
   deleteFile: (filePath: string) => Promise<{ success: boolean }>;
   deleteFolder: (folderPath: string) => Promise<{ success: boolean }>;
+  createFile: (parentPath: string, fileName: string) => Promise<{ success: boolean; filePath: string | null }>;
+  createFolder: (parentPath: string, folderName: string) => Promise<{ success: boolean; folderPath: string | null }>;
+  renameFile: (oldPath: string, newName: string) => Promise<{ success: boolean; newPath: string | null }>;
   closeWorkspace: () => Promise<{ success: boolean }>;
   onMenuOpenWorkspace: (callback: () => void) => () => void;
   onMenuCloseTab: (callback: () => void) => () => void;
@@ -40,8 +43,8 @@ interface ElectronAPI {
   cancelChat: () => Promise<void>;
   onChatToolExecuted: (callback: (data: { action: string; data: unknown }) => void) => () => void;
   // RAG API
-  indexWorkspace: (workspacePath: string) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
-  indexOneDriveWorkspace: (folderId: string, folderPath: string) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
+  indexWorkspace: (workspacePath: string, forceReindex?: boolean) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
+  indexOneDriveWorkspace: (folderId: string, folderPath: string, forceReindex?: boolean) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
   onRagIndexProgress: (callback: (data: { current: number; total: number; fileName: string; percentage: number }) => void) => () => void;
   onRagIndexComplete: (callback: (data: { chunksIndexed: number; filesIndexed: number; fromCache?: boolean }) => void) => () => void;
   getRagStatus: () => Promise<{ isIndexing: boolean; chunksCount: number; lastUpdated: number | null; workspacePath: string | null }>;
@@ -59,6 +62,7 @@ interface ElectronAPI {
   updateDeal: (id: string, deal: Partial<Deal>) => Promise<Deal | null>;
   deleteDeal: (id: string) => Promise<boolean>;
   importDealsFromCSV: () => Promise<{ imported: number; errors: string[] }>;
+  exportDealsToCSV: () => Promise<{ exported: number; filePath: string | null }>;
   detectDealFromPath: (filePath: string) => Promise<Deal | null>;
   // Deal Activities API
   addDealActivity: (activity: Omit<DealActivity, 'id' | 'createdAt'>) => Promise<DealActivity>;

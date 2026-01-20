@@ -66,6 +66,9 @@ interface AppState {
   refreshTree: () => Promise<void>;
   deleteFile: (filePath: string) => Promise<boolean>;
   deleteFolder: (folderPath: string) => Promise<boolean>;
+  createFile: (parentPath: string, fileName: string) => Promise<boolean>;
+  createFolder: (parentPath: string, folderName: string) => Promise<boolean>;
+  renameItem: (oldPath: string, newName: string) => Promise<boolean>;
   
   openFile: (path: string, name: string) => Promise<void>;
   closeTab: (tabId: string) => void;
@@ -292,6 +295,71 @@ export const useAppStore = create<AppState>((set, get) => ({
       return result.success;
     } catch (error) {
       get().showToast('error', `Failed to delete folder: ${error}`);
+      return false;
+    }
+  },
+
+  createFile: async (parentPath: string, fileName: string): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.createFile(parentPath, fileName);
+      if (result.success) {
+        await get().refreshTree();
+        // Open the newly created file
+        if (result.filePath) {
+          get().openFile(result.filePath, fileName);
+        }
+        get().showToast('success', 'File created');
+      }
+      return result.success;
+    } catch (error) {
+      get().showToast('error', `Failed to create file: ${error}`);
+      return false;
+    }
+  },
+
+  createFolder: async (parentPath: string, folderName: string): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.createFolder(parentPath, folderName);
+      if (result.success) {
+        await get().refreshTree();
+        get().showToast('success', 'Folder created');
+      }
+      return result.success;
+    } catch (error) {
+      get().showToast('error', `Failed to create folder: ${error}`);
+      return false;
+    }
+  },
+
+  renameItem: async (oldPath: string, newName: string): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.renameFile(oldPath, newName);
+      if (result.success) {
+        // Update any open tabs with the old path
+        const { tabs } = get();
+        const affectedTab = tabs.find(t => t.path === oldPath || t.path.startsWith(oldPath + '/') || t.path.startsWith(oldPath + '\\'));
+        if (affectedTab && result.newPath) {
+          // Update tab path
+          set((state) => ({
+            tabs: state.tabs.map(t => {
+              if (t.path === oldPath) {
+                return { ...t, path: result.newPath!, name: newName };
+              }
+              // Handle files inside a renamed folder
+              if (t.path.startsWith(oldPath + '/') || t.path.startsWith(oldPath + '\\')) {
+                const newTabPath = result.newPath + t.path.slice(oldPath.length);
+                return { ...t, path: newTabPath };
+              }
+              return t;
+            }),
+          }));
+        }
+        await get().refreshTree();
+        get().showToast('success', 'Renamed successfully');
+      }
+      return result.success;
+    } catch (error) {
+      get().showToast('error', `Failed to rename: ${error}`);
       return false;
     }
   },
@@ -624,6 +692,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   // RAG actions
   indexWorkspace: async (forceReindex = false) => {
     const { workspacePath, hasApiKey, workspaceSource, oneDriveFolderId } = get();
+    console.log('[Store] indexWorkspace called:', { workspacePath, hasApiKey, workspaceSource, oneDriveFolderId, forceReindex });
+    
     if (!workspacePath) {
       get().showToast('error', 'No workspace open');
       return;
@@ -637,10 +707,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // Set up progress listener
     const removeProgressListener = window.electronAPI.onRagIndexProgress((data) => {
+      console.log('[Store] RAG progress:', data);
       set({ indexingProgress: data });
     });
 
     const removeCompleteListener = window.electronAPI.onRagIndexComplete((data) => {
+      console.log('[Store] RAG complete:', data);
       set({ 
         isIndexing: false, 
         indexingProgress: null, 
@@ -656,10 +728,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       
       // Use appropriate indexer based on workspace source
       if (workspaceSource === 'onedrive' && oneDriveFolderId) {
+        console.log('[Store] Calling indexOneDriveWorkspace');
         result = await window.electronAPI.indexOneDriveWorkspace(oneDriveFolderId, workspacePath, forceReindex);
       } else {
+        console.log('[Store] Calling indexWorkspace (local)');
         result = await window.electronAPI.indexWorkspace(workspacePath, forceReindex);
       }
+      
+      console.log('[Store] Index result:', result);
       
       if (!result.success) {
         set({ isIndexing: false, indexingProgress: null });
@@ -668,6 +744,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         removeCompleteListener();
       }
     } catch (error) {
+      console.error('[Store] Index error:', error);
       set({ isIndexing: false, indexingProgress: null });
       get().showToast('error', 'Failed to index workspace');
       removeProgressListener();

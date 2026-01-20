@@ -312,6 +312,73 @@ export function setupIpcHandlers(): void {
     }
   });
 
+  // Create file
+  ipcMain.handle(IPC_CHANNELS.CREATE_FILE, async (_event, parentPath: string, fileName: string): Promise<{ success: boolean; filePath: string | null }> => {
+    try {
+      const filePath = path.join(parentPath, fileName);
+      
+      // Check if file already exists
+      try {
+        await fs.access(filePath);
+        throw new Error('File already exists');
+      } catch (e) {
+        // File doesn't exist, which is what we want
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+      
+      await fs.writeFile(filePath, '', 'utf-8');
+      return { success: true, filePath };
+    } catch (error) {
+      console.error('Failed to create file:', error);
+      throw new Error(`Failed to create file: ${error}`);
+    }
+  });
+
+  // Create folder
+  ipcMain.handle(IPC_CHANNELS.CREATE_FOLDER, async (_event, parentPath: string, folderName: string): Promise<{ success: boolean; folderPath: string | null }> => {
+    try {
+      const folderPath = path.join(parentPath, folderName);
+      
+      // Check if folder already exists
+      try {
+        await fs.access(folderPath);
+        throw new Error('Folder already exists');
+      } catch (e) {
+        // Folder doesn't exist, which is what we want
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+      
+      await fs.mkdir(folderPath);
+      return { success: true, folderPath };
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      throw new Error(`Failed to create folder: ${error}`);
+    }
+  });
+
+  // Rename file or folder
+  ipcMain.handle(IPC_CHANNELS.RENAME_FILE, async (_event, oldPath: string, newName: string): Promise<{ success: boolean; newPath: string | null }> => {
+    try {
+      const parentDir = path.dirname(oldPath);
+      const newPath = path.join(parentDir, newName);
+      
+      // Check if target already exists
+      try {
+        await fs.access(newPath);
+        throw new Error('A file or folder with that name already exists');
+      } catch (e) {
+        // Target doesn't exist, which is what we want
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+      
+      await fs.rename(oldPath, newPath);
+      return { success: true, newPath };
+    } catch (error) {
+      console.error('Failed to rename:', error);
+      throw new Error(`Failed to rename: ${error}`);
+    }
+  });
+
   // Close workspace
   ipcMain.handle(IPC_CHANNELS.CLOSE_WORKSPACE, async (): Promise<{ success: boolean }> => {
     return { success: true };
@@ -368,6 +435,7 @@ export function setupIpcHandlers(): void {
 
   // RAG: Index workspace
   ipcMain.handle(IPC_CHANNELS.RAG_INDEX_WORKSPACE, async (event, workspacePath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    console.log('[IPC] RAG_INDEX_WORKSPACE called:', { workspacePath, forceReindex });
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window) {
       return await indexWorkspace(workspacePath, window, forceReindex);
@@ -377,6 +445,7 @@ export function setupIpcHandlers(): void {
 
   // RAG: Index OneDrive workspace
   ipcMain.handle(IPC_CHANNELS.RAG_INDEX_ONEDRIVE, async (event, folderId: string, folderPath: string, forceReindex = false): Promise<{ success: boolean; chunksIndexed: number; error?: string }> => {
+    console.log('[IPC] RAG_INDEX_ONEDRIVE called:', { folderId, folderPath, forceReindex });
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window) {
       return await indexOneDriveWorkspace(folderId, folderPath, window, forceReindex);
@@ -555,6 +624,77 @@ export function setupIpcHandlers(): void {
     }
 
     return { imported, errors };
+  });
+
+  // Export deals to CSV
+  ipcMain.handle(IPC_CHANNELS.DEAL_EXPORT_CSV, async (): Promise<{ exported: number; filePath: string | null }> => {
+    const deals = getAllDeals();
+    
+    if (deals.length === 0) {
+      return { exported: 0, filePath: null };
+    }
+
+    const result = await dialog.showSaveDialog({
+      title: 'Export Deals to CSV',
+      defaultPath: `deals-export-${new Date().toISOString().split('T')[0]}.csv`,
+      filters: [
+        { name: 'CSV Files', extensions: ['csv'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { exported: 0, filePath: null };
+    }
+
+    // Build CSV content
+    const headers = [
+      'Deal Number',
+      'Borrower Name',
+      'Borrower Contact',
+      'Loan Amount',
+      'Interest Rate',
+      'Term (Months)',
+      'Collateral Description',
+      'Stage',
+      'Priority',
+      'Assigned To',
+      'Expected Close Date',
+      'Notes',
+      'Created At',
+      'Updated At',
+    ];
+
+    const escapeCSV = (value: string | number | null | undefined): string => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const rows = deals.map(deal => [
+      deal.dealNumber,
+      deal.borrowerName,
+      deal.borrowerContact,
+      deal.loanAmount,
+      deal.interestRate,
+      deal.termMonths,
+      deal.collateralDescription,
+      deal.stage,
+      deal.priority,
+      deal.assignedTo,
+      deal.expectedCloseDate,
+      deal.notes,
+      deal.createdAt,
+      deal.updatedAt,
+    ].map(escapeCSV).join(','));
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    
+    await fs.writeFile(result.filePath, csvContent, 'utf-8');
+    
+    return { exported: deals.length, filePath: result.filePath };
   });
 
   // Update deal

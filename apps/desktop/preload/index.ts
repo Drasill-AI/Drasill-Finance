@@ -91,6 +91,27 @@ const api = {
   },
 
   /**
+   * Create a new file
+   */
+  createFile: (parentPath: string, fileName: string): Promise<{ success: boolean; filePath: string | null }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CREATE_FILE, parentPath, fileName);
+  },
+
+  /**
+   * Create a new folder
+   */
+  createFolder: (parentPath: string, folderName: string): Promise<{ success: boolean; folderPath: string | null }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CREATE_FOLDER, parentPath, folderName);
+  },
+
+  /**
+   * Rename a file or folder
+   */
+  renameFile: (oldPath: string, newName: string): Promise<{ success: boolean; newPath: string | null }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RENAME_FILE, oldPath, newName);
+  },
+
+  /**
    * Close the current workspace
    */
   closeWorkspace: (): Promise<{ success: boolean }> => {
@@ -300,6 +321,13 @@ const api = {
    */
   importDealsFromCSV: (): Promise<{ imported: number; errors: string[] }> => {
     return ipcRenderer.invoke(IPC_CHANNELS.DEAL_IMPORT_CSV);
+  },
+
+  /**
+   * Export deals to CSV file
+   */
+  exportDealsToCSV: (): Promise<{ exported: number; filePath: string | null }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEAL_EXPORT_CSV);
   },
 
   /**

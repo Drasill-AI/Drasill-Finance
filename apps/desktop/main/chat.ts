@@ -204,7 +204,7 @@ export async function sendChatMessage(
           console.error('Failed to parse tool arguments:', e);
         }
         
-        const result = executeTool(toolCall.function.name, args);
+        const result = await executeTool(toolCall.function.name, args);
         
         // Notify renderer if action was taken
         if (result.actionTaken) {

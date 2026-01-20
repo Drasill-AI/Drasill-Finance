@@ -3,7 +3,7 @@
  * Enables natural language interaction with the deal database
  */
 import OpenAI from 'openai';
-import type { Deal, DealActivity, DealStage } from '@drasill/shared';
+import type { Deal, DealActivity, DealStage, SchematicToolCall } from '@drasill/shared';
 import {
   getAllDeals,
   getDeal,
@@ -13,6 +13,7 @@ import {
   getActivitiesForDeal,
   calculatePipelineAnalytics,
 } from './database';
+import { processSchematicToolCall } from './schematic';
 
 // ============ Tool Definitions ============
 
@@ -171,6 +172,31 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'retrieve_schematic',
+      description: 'Retrieve a schematic diagram and service documentation for a machine component. Use this when the user asks about parts, components, maintenance procedures, or service information for equipment.',
+      parameters: {
+        type: 'object',
+        properties: {
+          component_name: {
+            type: 'string',
+            description: 'The name of the component or part to look up (e.g., "hydraulic pump", "motor assembly", "control valve").',
+          },
+          machine_model: {
+            type: 'string',
+            description: 'The machine model or equipment identifier (optional).',
+          },
+          additional_context: {
+            type: 'string',
+            description: 'Any additional context about what the user is looking for (e.g., "replacement procedure", "wiring diagram").',
+          },
+        },
+        required: ['component_name'],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -282,7 +308,7 @@ export interface ToolResult {
 /**
  * Execute a tool call and return the result
  */
-export function executeTool(toolName: string, args: Record<string, unknown>): ToolResult {
+export async function executeTool(toolName: string, args: Record<string, unknown>): Promise<ToolResult> {
   try {
     switch (toolName) {
       case 'get_deals':
@@ -305,6 +331,9 @@ export function executeTool(toolName: string, args: Record<string, unknown>): To
 
       case 'get_deal_activities':
         return executeGetDealActivities(args);
+
+      case 'retrieve_schematic':
+        return executeRetrieveSchematic(args);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -552,6 +581,44 @@ function executeGetDealActivities(args: Record<string, unknown>): ToolResult {
     success: true,
     data: summary,
     message: `Found ${activities.length} activities ${contextMessage}.`,
+  };
+}
+
+async function executeRetrieveSchematic(args: Record<string, unknown>): Promise<ToolResult> {
+  const componentName = args.component_name as string;
+  const machineModel = args.machine_model as string | undefined;
+  const additionalContext = args.additional_context as string | undefined;
+
+  if (!componentName) {
+    return { success: false, error: 'Component name is required.' };
+  }
+
+  const toolCall: SchematicToolCall = {
+    component_name: componentName,
+    machine_model: machineModel,
+    additional_context: additionalContext,
+  };
+
+  const response = await processSchematicToolCall(toolCall);
+
+  if (response.status === 'error') {
+    return {
+      success: false,
+      error: response.message || 'Failed to retrieve schematic.',
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      componentId: response.component_id,
+      componentName: response.component_name || componentName,
+      machineModel: response.machine_model || machineModel,
+      imagePath: response.image_path,
+      manualContext: response.manual_context,
+    },
+    message: `Retrieved schematic for ${response.component_name || componentName}${response.machine_model ? ` (${response.machine_model})` : ''}.`,
+    actionTaken: 'schematic_retrieved',
   };
 }
 

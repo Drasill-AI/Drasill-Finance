@@ -628,7 +628,7 @@ export function RightPanel() {
             {hasApiKey && ragChunksCount === 0 && workspacePath && (
               <button 
                 className={styles.indexButton}
-                onClick={indexWorkspace}
+                onClick={() => indexWorkspace()}
                 disabled={isIndexing}
               >
                 {isIndexing ? 'Indexing...' : 'Index Workspace for AI'}
@@ -718,10 +718,11 @@ export function RightPanel() {
       <div className={styles.inputArea}>
         <textarea
           ref={textareaRef}
+          data-chat-input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={hasApiKey ? "Ask a question..." : "Configure API key first..."}
+          placeholder={hasApiKey ? "Ask a question... (Ctrl+/)" : "Configure API key first..."}
           className={styles.input}
           disabled={!hasApiKey || isChatLoading}
           rows={1}

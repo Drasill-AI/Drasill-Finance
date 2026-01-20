@@ -117,6 +117,19 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
     }
   };
 
+  const handleExportCSV = async () => {
+    try {
+      const result = await window.electronAPI.exportDealsToCSV();
+      if (result.exported > 0 && result.filePath) {
+        showToast('success', `Exported ${result.exported} deal${result.exported > 1 ? 's' : ''} to CSV`);
+      } else if (result.exported === 0) {
+        showToast('error', 'No deals to export');
+      }
+    } catch (error) {
+      showToast('error', 'Failed to export deals to CSV');
+    }
+  };
+
   const getDealName = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
     return deal ? deal.borrowerName : `Deal #${dealId}`;
@@ -296,6 +309,18 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   {isImporting ? 'Importing...' : 'Import CSV'}
+                </button>
+                <button 
+                  className={styles.addButton}
+                  onClick={handleExportCSV}
+                  disabled={!analytics || analytics.totalDeals === 0}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Export CSV
                 </button>
               </div>
               <div className={styles.analyticsGrid}>
