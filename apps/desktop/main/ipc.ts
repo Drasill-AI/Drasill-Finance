@@ -22,6 +22,7 @@ import {
   ChatSessionFull,
   ChatMessage,
   ChatSessionSource,
+  ActivitySource,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
 import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady } from './rag';
@@ -54,6 +55,9 @@ import {
   updateChatSession,
   deleteChatSession,
   addChatMessage,
+  addActivitySource,
+  removeActivitySource,
+  getActivitiesWithSources,
 } from './database';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for reading files
@@ -774,6 +778,31 @@ export function setupIpcHandlers(): void {
   });
 
   // ==========================================
+  // Activity Sources (Document Citations)
+  // ==========================================
+
+  // Add source to activity
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_ADD_SOURCE, async (_event, activityId: string, source: ActivitySource): Promise<ActivitySource> => {
+    return addActivitySource(activityId, source);
+  });
+
+  // Remove source from activity
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_REMOVE_SOURCE, async (_event, sourceId: string): Promise<boolean> => {
+    return removeActivitySource(sourceId);
+  });
+
+  // Export activities with sources as Markdown
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_EXPORT_MARKDOWN, async (_event, dealId: string): Promise<string> => {
+    const deal = getDeal(dealId);
+    if (!deal) {
+      throw new Error('Deal not found');
+    }
+    
+    const activities = getActivitiesWithSources(dealId);
+    return generateActivitiesMarkdown(deal, activities);
+  });
+
+  // ==========================================
   // Pipeline Analytics
   // ==========================================
 
@@ -982,4 +1011,87 @@ export function setupIpcHandlers(): void {
       throw error;
     }
   });
+}
+
+/**
+ * Generate Markdown export of activities with citations
+ */
+function generateActivitiesMarkdown(deal: Deal, activities: DealActivity[]): string {
+  const lines: string[] = [];
+  const allSources: Array<{ index: number; source: ActivitySource }> = [];
+  let sourceIndex = 1;
+  
+  // Header
+  lines.push(`# Deal Activity Report`);
+  lines.push(``);
+  lines.push(`**Deal:** ${deal.dealNumber}`);
+  lines.push(`**Borrower:** ${deal.borrowerName}`);
+  lines.push(`**Loan Amount:** $${deal.loanAmount.toLocaleString()}`);
+  lines.push(`**Stage:** ${deal.stage}`);
+  lines.push(`**Generated:** ${new Date().toLocaleDateString()}`);
+  lines.push(``);
+  lines.push(`---`);
+  lines.push(``);
+  
+  // Activities
+  lines.push(`## Activities`);
+  lines.push(``);
+  
+  if (activities.length === 0) {
+    lines.push(`*No activities recorded.*`);
+  } else {
+    for (const activity of activities) {
+      const date = new Date(activity.performedAt).toLocaleDateString();
+      const time = new Date(activity.performedAt).toLocaleTimeString();
+      const typeLabel = activity.type.charAt(0).toUpperCase() + activity.type.slice(1);
+      
+      lines.push(`### ${typeLabel} - ${date} ${time}`);
+      if (activity.performedBy) {
+        lines.push(`*By: ${activity.performedBy}*`);
+      }
+      lines.push(``);
+      
+      // Description with inline citations
+      let description = activity.description;
+      const activitySources = activity.sources || [];
+      
+      if (activitySources.length > 0) {
+        // Add citation numbers to the end of description
+        const citations = activitySources.map(source => {
+          const idx = sourceIndex++;
+          allSources.push({ index: idx, source });
+          return `[${idx}]`;
+        }).join('');
+        description += ` ${citations}`;
+      }
+      
+      lines.push(description);
+      lines.push(``);
+    }
+  }
+  
+  // References section
+  if (allSources.length > 0) {
+    lines.push(`---`);
+    lines.push(``);
+    lines.push(`## References`);
+    lines.push(``);
+    
+    for (const { index, source } of allSources) {
+      let citation = `**[${index}]** ${source.fileName}`;
+      
+      if (source.pageNumber) {
+        citation += `, page ${source.pageNumber}`;
+      }
+      if (source.section) {
+        citation += `, "${source.section}"`;
+      }
+      
+      lines.push(citation);
+      lines.push(`  - Path: \`${source.filePath}\``);
+      lines.push(``);
+    }
+  }
+  
+  return lines.join('\n');
 }

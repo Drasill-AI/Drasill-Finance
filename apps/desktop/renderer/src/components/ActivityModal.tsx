@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
-import { DealActivityType, DealActivity } from '@drasill/shared';
+import { DealActivityType, DealActivity, ActivitySource } from '@drasill/shared';
 import styles from './ActivityModal.module.css';
 
 const ACTIVITY_TYPES: { value: DealActivityType; label: string }[] = [
@@ -21,6 +21,7 @@ export function ActivityModal() {
     refreshActivities,
     editingActivity,
     setEditingActivity,
+    tabs,
   } = useAppStore();
 
   const isEditMode = !!editingActivity;
@@ -32,6 +33,9 @@ export function ActivityModal() {
     performedAt: new Date().toISOString().slice(0, 16),
     description: '',
   });
+
+  // Sources to attach to the activity (from open tabs)
+  const [selectedSources, setSelectedSources] = useState<ActivitySource[]>([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -55,6 +59,8 @@ export function ActivityModal() {
           performedAt: editingActivity.performedAt ? new Date(editingActivity.performedAt).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
           description: editingActivity.description || '',
         });
+        // Load existing sources
+        setSelectedSources(editingActivity.sources || []);
       } else {
         // Add mode: reset to defaults
         setFormData({
@@ -64,6 +70,7 @@ export function ActivityModal() {
           performedAt: new Date().toISOString().slice(0, 16),
           description: '',
         });
+        setSelectedSources([]);
       }
     }
   }, [isActivityModalOpen, editingActivity, selectedDealId, deals]);
@@ -71,6 +78,7 @@ export function ActivityModal() {
   const handleClose = () => {
     setActivityModalOpen(false);
     setEditingActivity(null);
+    setSelectedSources([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,12 +105,30 @@ export function ActivityModal() {
         metadata: null,
       };
 
+      let activityId: string;
+
       if (isEditMode && editingActivity?.id) {
         await window.electronAPI.updateDealActivity(editingActivity.id, activityData);
+        activityId = editingActivity.id;
+        
+        // Remove existing sources and add new ones
+        const existingSources = editingActivity.sources || [];
+        for (const source of existingSources) {
+          if (source.id) {
+            await window.electronAPI.removeActivitySource(source.id);
+          }
+        }
+        
         showToast('success', 'Activity updated successfully');
       } else {
-        await window.electronAPI.addDealActivity(activityData);
+        const newActivity = await window.electronAPI.addDealActivity(activityData);
+        activityId = newActivity.id;
         showToast('success', 'Activity added successfully');
+      }
+
+      // Add selected sources to the activity
+      for (const source of selectedSources) {
+        await window.electronAPI.addActivitySource(activityId, source);
       }
 
       handleClose();
@@ -228,6 +254,64 @@ export function ActivityModal() {
                 rows={4}
                 required
               />
+            </div>
+
+            {/* Document Sources / Citations */}
+            <div className={styles.formGroup}>
+              <label className={styles.label}>
+                Document Citations
+                <span className={styles.labelHint}>(optional)</span>
+              </label>
+              
+              {/* Selected sources */}
+              {selectedSources.length > 0 && (
+                <div className={styles.sourcesList}>
+                  {selectedSources.map((source, index) => (
+                    <div key={index} className={styles.sourceItem}>
+                      <span className={styles.sourceFileName}>{source.fileName}</span>
+                      {source.pageNumber && (
+                        <span className={styles.sourcePage}>p.{source.pageNumber}</span>
+                      )}
+                      <button
+                        type="button"
+                        className={styles.removeSourceButton}
+                        onClick={() => setSelectedSources(prev => prev.filter((_, i) => i !== index))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add from open tabs */}
+              {tabs.length > 0 && (
+                <div className={styles.addSourceSection}>
+                  <select
+                    className={styles.sourceSelect}
+                    value=""
+                    onChange={(e) => {
+                      const tab = tabs.find(t => t.id === e.target.value);
+                      if (tab && !selectedSources.some(s => s.filePath === tab.path)) {
+                        setSelectedSources(prev => [...prev, {
+                          fileName: tab.name,
+                          filePath: tab.path,
+                        }]);
+                      }
+                    }}
+                  >
+                    <option value="">Add source from open tabs...</option>
+                    {tabs
+                      .filter(tab => !selectedSources.some(s => s.filePath === tab.path))
+                      .map(tab => (
+                        <option key={tab.id} value={tab.id}>
+                          {tab.name}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 

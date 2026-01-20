@@ -18,6 +18,7 @@ import {
   ChatSessionFull,
   ChatMessage,
   ChatSessionSource,
+  ActivitySource,
 } from '@drasill/shared';
 
 /**
@@ -385,6 +386,31 @@ const api = {
    */
   deleteDealActivity: (id: string): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_DELETE, id);
+  },
+
+  // ==========================================
+  // Activity Sources (Document Citations) API
+  // ==========================================
+
+  /**
+   * Add source/citation to an activity
+   */
+  addActivitySource: (activityId: string, source: ActivitySource): Promise<ActivitySource> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_ADD_SOURCE, activityId, source);
+  },
+
+  /**
+   * Remove source from an activity
+   */
+  removeActivitySource: (sourceId: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_REMOVE_SOURCE, sourceId);
+  },
+
+  /**
+   * Export activities with citations as Markdown
+   */
+  exportActivitiesMarkdown: (dealId: string): Promise<string> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_EXPORT_MARKDOWN, dealId);
   },
 
   // ==========================================

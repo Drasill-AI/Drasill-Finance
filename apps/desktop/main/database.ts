@@ -6,7 +6,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
-import type { Deal, DealActivity, DealStage, DealActivityType, PipelineAnalytics, ChatSession, ChatSessionFull, ChatMessage, ChatSessionSource } from '@drasill/shared';
+import type { Deal, DealActivity, DealStage, DealActivityType, PipelineAnalytics, ChatSession, ChatSessionFull, ChatMessage, ChatSessionSource, ActivitySource } from '@drasill/shared';
 
 let db: Database.Database | null = null;
 
@@ -125,6 +125,23 @@ function initializeSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_deal ON chat_sessions(deal_id);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+
+    -- Activity sources table (for document citations)
+    CREATE TABLE IF NOT EXISTS activity_sources (
+      id TEXT PRIMARY KEY,
+      activity_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      section TEXT,
+      page_number INTEGER,
+      source TEXT,
+      onedrive_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (activity_id) REFERENCES deal_activities(id) ON DELETE CASCADE
+    );
+
+    -- Activity sources index
+    CREATE INDEX IF NOT EXISTS idx_activity_sources_activity ON activity_sources(activity_id);
   `);
 }
 
@@ -407,6 +424,87 @@ export function deleteDealActivity(id: string): boolean {
 }
 
 // =============================================================================
+// ACTIVITY SOURCE OPERATIONS (Document Citations)
+// =============================================================================
+
+/**
+ * Add a source/citation to an activity
+ */
+export function addActivitySource(activityId: string, source: ActivitySource): ActivitySource {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  
+  const stmt = db.prepare(`
+    INSERT INTO activity_sources (id, activity_id, file_name, file_path, section, page_number, source, onedrive_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    id,
+    activityId,
+    source.fileName,
+    source.filePath,
+    source.section || null,
+    source.pageNumber || null,
+    source.source || null,
+    source.oneDriveId || null
+  );
+  
+  return { ...source, id };
+}
+
+/**
+ * Get all sources for an activity
+ */
+export function getActivitySources(activityId: string): ActivitySource[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM activity_sources WHERE activity_id = ? ORDER BY created_at').all(activityId) as any[];
+  return rows.map(mapRowToSource);
+}
+
+/**
+ * Remove a source from an activity
+ */
+export function removeActivitySource(sourceId: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM activity_sources WHERE id = ?').run(sourceId);
+  return result.changes > 0;
+}
+
+/**
+ * Get activities with their sources for a deal (for export)
+ */
+export function getActivitiesWithSources(dealId: string): DealActivity[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const activities = getActivitiesForDeal(dealId);
+  
+  // Load sources for each activity
+  return activities.map(activity => ({
+    ...activity,
+    sources: activity.id ? getActivitySources(activity.id) : []
+  }));
+}
+
+/**
+ * Map database row to ActivitySource
+ */
+function mapRowToSource(row: any): ActivitySource {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    filePath: row.file_path,
+    section: row.section || undefined,
+    pageNumber: row.page_number || undefined,
+    source: row.source || undefined,
+    oneDriveId: row.onedrive_id || undefined
+  };
+}
+
+// =============================================================================
 // PIPELINE ANALYTICS
 // =============================================================================
 
@@ -479,14 +577,16 @@ function mapRowToDeal(row: any): Deal {
 }
 
 function mapRowToActivity(row: any): DealActivity {
+  const activityId = row.id;
   return {
-    id: row.id,
+    id: activityId,
     dealId: row.deal_id,
     type: row.type as DealActivityType,
     description: row.description,
     performedBy: row.performed_by,
     performedAt: row.performed_at,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    sources: activityId ? getActivitySources(activityId) : []
   };
 }
 

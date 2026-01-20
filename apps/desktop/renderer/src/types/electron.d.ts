@@ -16,6 +16,7 @@ import type {
   ChatSessionFull,
   ChatMessage,
   ChatSessionSource,
+  ActivitySource,
 } from '@drasill/shared';
 
 interface ElectronAPI {
@@ -74,6 +75,10 @@ interface ElectronAPI {
   getAllActivities: (limit?: number) => Promise<DealActivity[]>;
   updateDealActivity: (id: string, data: Partial<Omit<DealActivity, 'id' | 'createdAt'>>) => Promise<DealActivity | null>;
   deleteDealActivity: (id: string) => Promise<boolean>;
+  // Activity Sources (Document Citations) API
+  addActivitySource: (activityId: string, source: ActivitySource) => Promise<ActivitySource>;
+  removeActivitySource: (sourceId: string) => Promise<boolean>;
+  exportActivitiesMarkdown: (dealId: string) => Promise<string>;
   // Pipeline Analytics API
   getPipelineAnalytics: () => Promise<PipelineAnalytics>;
   // Schematics API

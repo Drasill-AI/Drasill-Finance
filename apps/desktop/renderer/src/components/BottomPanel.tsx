@@ -130,6 +130,26 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
     }
   };
 
+  const handleExportActivitiesMarkdown = async () => {
+    if (selectedDealId === 'all') {
+      showToast('error', 'Please select a specific deal to export');
+      return;
+    }
+
+    try {
+      const markdown = await window.electronAPI.exportActivitiesMarkdown(selectedDealId);
+      
+      // Copy to clipboard and offer save
+      await navigator.clipboard.writeText(markdown);
+      showToast('success', 'Markdown copied to clipboard!');
+      
+      // Also log to console for easy access
+      console.log('Exported Markdown:\n', markdown);
+    } catch (error) {
+      showToast('error', 'Failed to export activities');
+    }
+  };
+
   const getDealName = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
     return deal ? deal.borrowerName : `Deal #${dealId}`;
@@ -255,6 +275,20 @@ export function BottomPanel({ height, onHeightChange, isOpen, onToggle }: Bottom
                   </svg>
                   Add Activity
                 </button>
+                {selectedDealId !== 'all' && (
+                  <button 
+                    className={styles.exportButton}
+                    onClick={handleExportActivitiesMarkdown}
+                    title="Export activities with citations as Markdown"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Export MD
+                  </button>
+                )}
               </div>
 
               <div className={styles.logsList}>

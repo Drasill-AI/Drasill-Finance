@@ -156,6 +156,9 @@ export const IPC_CHANNELS = {
   ACTIVITY_GET_BY_DEAL: 'activity-get-by-deal',
   ACTIVITY_UPDATE: 'activity-update',
   ACTIVITY_DELETE: 'activity-delete',
+  ACTIVITY_ADD_SOURCE: 'activity-add-source',
+  ACTIVITY_REMOVE_SOURCE: 'activity-remove-source',
+  ACTIVITY_EXPORT_MARKDOWN: 'activity-export-markdown',
   // Pipeline Analytics
   PIPELINE_GET: 'pipeline-get',
   // Database
@@ -439,6 +442,20 @@ export interface Deal {
 export type DealActivityType = 'note' | 'call' | 'email' | 'document' | 'stage_change' | 'meeting';
 
 /**
+ * Source citation for an activity
+ */
+export interface ActivitySource {
+  id?: string;
+  activityId?: string;
+  fileName: string;
+  filePath: string;
+  section?: string;
+  pageNumber?: number;
+  source?: 'local' | 'onedrive';
+  oneDriveId?: string;
+}
+
+/**
  * Deal activity record
  */
 export interface DealActivity {
@@ -450,6 +467,7 @@ export interface DealActivity {
   performedAt: string;
   metadata?: string | null; // JSON for flexible data
   createdAt?: string;
+  sources?: ActivitySource[]; // Attached source citations
 }
 
 /**

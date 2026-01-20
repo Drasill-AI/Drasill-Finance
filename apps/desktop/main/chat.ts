@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron';
 import { ChatRequest, IPC_CHANNELS, FileContext } from '@drasill/shared';
 import { getRAGContext, getIndexingStatus } from './rag';
 import * as keychain from './keychain';
-import { CHAT_TOOLS, executeTool, buildDealContext } from './chatTools';
+import { CHAT_TOOLS, executeTool, buildDealContext, ChatToolContext } from './chatTools';
 
 let openai: OpenAI | null = null;
 let abortController: AbortController | null = null;
@@ -162,6 +162,18 @@ export async function sendChatMessage(
       });
     }
     
+    // Aggregate RAG sources from conversation history for activity creation
+    const allRagSources: RAGSource[] = [...ragSources];
+    for (const msg of request.history) {
+      if (msg.ragSources && msg.ragSources.length > 0) {
+        allRagSources.push(...msg.ragSources.map(s => ({
+          fileName: s.fileName,
+          filePath: s.filePath,
+          section: s.section || '',
+        })));
+      }
+    }
+    
     // Build messages array
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -187,6 +199,11 @@ export async function sendChatMessage(
 
     let assistantMessage = response.choices[0].message;
     
+    // Build tool context with cumulative RAG sources for activity creation
+    const toolContext: ChatToolContext = {
+      ragSources: allRagSources,
+    };
+    
     // Handle tool calls iteratively (max 5 iterations to prevent infinite loops)
     let iterations = 0;
     while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 5) {
@@ -204,7 +221,7 @@ export async function sendChatMessage(
           console.error('Failed to parse tool arguments:', e);
         }
         
-        const result = await executeTool(toolCall.function.name, args);
+        const result = await executeTool(toolCall.function.name, args, toolContext);
         
         // Notify renderer if action was taken
         if (result.actionTaken) {

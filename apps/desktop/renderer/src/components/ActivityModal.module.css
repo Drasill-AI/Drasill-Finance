@@ -234,3 +234,83 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Document Sources / Citations */
+.labelHint {
+  font-weight: 400;
+  color: var(--text-muted, #808080);
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.sourcesList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sourceItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.sourceFileName {
+  flex: 1;
+  color: var(--text-primary, #fff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourcePage {
+  color: var(--text-muted, #808080);
+  font-size: 12px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.removeSourceButton {
+  background: none;
+  border: none;
+  color: var(--text-muted, #808080);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.removeSourceButton:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--error, #F87171);
+}
+
+.addSourceSection {
+  margin-top: 4px;
+}
+
+.sourceSelect {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-primary, #1e1e1e);
+  border: 1px solid var(--border, #3d3d3d);
+  border-radius: 6px;
+  color: var(--text-primary, #cccccc);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sourceSelect:focus {
+  outline: none;
+  border-color: var(--accent, #4D9CFF);
+}

@@ -12,6 +12,7 @@ import {
   getAllActivities,
   getActivitiesForDeal,
   calculatePipelineAnalytics,
+  addActivitySource,
 } from './database';
 import { processSchematicToolCall } from './schematic';
 
@@ -74,7 +75,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'add_deal_activity',
-      description: 'Add a new activity entry for a deal. Use this when the user wants to record a call, meeting, note, email, or document.',
+      description: 'Add a new activity entry for a deal. Use this when the user wants to record a call, meeting, note, email, or document. IMPORTANT: When creating activities from conversation context, set use_chat_sources=true to automatically attach any documents referenced in the chat as citations.',
       parameters: {
         type: 'object',
         properties: {
@@ -89,7 +90,7 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
           },
           description: {
             type: 'string',
-            description: 'Description of the activity, observations, or notes.',
+            description: 'Description of the activity, observations, or notes. Should summarize the relevant conversation context.',
           },
           performed_by: {
             type: 'string',
@@ -98,6 +99,10 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
           performed_at: {
             type: 'string',
             description: 'ISO timestamp when activity occurred. Defaults to now if not provided.',
+          },
+          use_chat_sources: {
+            type: 'boolean',
+            description: 'If true, automatically attach any documents referenced in the current chat conversation as citations/sources for this activity. Default true when creating from chat context.',
           },
         },
         required: ['deal_id', 'type', 'description'],
@@ -306,9 +311,25 @@ export interface ToolResult {
 }
 
 /**
+ * Chat context passed to tool execution
+ * Contains sources referenced during the conversation
+ */
+export interface ChatToolContext {
+  ragSources: Array<{
+    fileName: string;
+    filePath: string;
+    section?: string;
+  }>;
+}
+
+/**
  * Execute a tool call and return the result
  */
-export async function executeTool(toolName: string, args: Record<string, unknown>): Promise<ToolResult> {
+export async function executeTool(
+  toolName: string, 
+  args: Record<string, unknown>,
+  context?: ChatToolContext
+): Promise<ToolResult> {
   try {
     switch (toolName) {
       case 'get_deals':
@@ -321,7 +342,7 @@ export async function executeTool(toolName: string, args: Record<string, unknown
         return executeGetDealDetails(args.deal_id as string);
 
       case 'add_deal_activity':
-        return executeAddDealActivity(args);
+        return executeAddDealActivity(args, context);
 
       case 'update_deal_stage':
         return executeUpdateDealStage(args);
@@ -441,13 +462,15 @@ function executeGetDealDetails(dealId: string): ToolResult {
   };
 }
 
-function executeAddDealActivity(args: Record<string, unknown>): ToolResult {
+function executeAddDealActivity(args: Record<string, unknown>, context?: ChatToolContext): ToolResult {
   const dealId = args.deal_id as string;
   const deal = getDeal(dealId);
 
   if (!deal) {
     return { success: false, error: `Deal with ID "${dealId}" not found.` };
   }
+
+  const useChatSources = args.use_chat_sources !== false; // Default to true
 
   const activityData = {
     dealId,
@@ -460,10 +483,36 @@ function executeAddDealActivity(args: Record<string, unknown>): ToolResult {
 
   const activity = createDealActivity(activityData);
 
+  // Attach sources from chat context if requested
+  let sourcesAdded = 0;
+  if (useChatSources && context?.ragSources && context.ragSources.length > 0 && activity.id) {
+    // De-duplicate sources by file path
+    const seenPaths = new Set<string>();
+    for (const ragSource of context.ragSources) {
+      if (!seenPaths.has(ragSource.filePath)) {
+        seenPaths.add(ragSource.filePath);
+        try {
+          addActivitySource(activity.id, {
+            fileName: ragSource.fileName,
+            filePath: ragSource.filePath,
+            section: ragSource.section,
+          });
+          sourcesAdded++;
+        } catch (err) {
+          console.error('[ChatTools] Failed to add activity source:', err);
+        }
+      }
+    }
+  }
+
+  const sourceMsg = sourcesAdded > 0 
+    ? ` Attached ${sourcesAdded} document citation${sourcesAdded > 1 ? 's' : ''} from the conversation.` 
+    : '';
+
   return {
     success: true,
-    data: activity,
-    message: `✅ Added ${activityData.type} activity for ${deal.borrowerName}'s deal. Activity ID: ${activity.id}`,
+    data: { ...activity, sourcesAdded },
+    message: `✅ Added ${activityData.type} activity for ${deal.borrowerName}'s deal.${sourceMsg}`,
     actionTaken: 'activity_created',
   };
 }
