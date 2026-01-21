@@ -23,26 +23,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install root dependencies
+        run: npm install
 
-      - name: Install electron-builder deps (macOS)
-        if: matrix.os == 'macos-latest'
+      - name: Install shared package dependencies
+        run: npm install
+        working-directory: packages/shared
+
+      - name: Build shared package
+        run: npx tsc
+        working-directory: packages/shared
+
+      - name: Install desktop dependencies
+        run: npm install
+        working-directory: apps/desktop
+
+      - name: Install electron-builder deps
         run: npx electron-builder install-app-deps
         working-directory: apps/desktop
 
-      - name: Build shared package
-        run: npm run build -w packages/shared
-
       - name: Build and package (Windows)
         if: matrix.os == 'windows-latest'
-        run: npm run package:win -w apps/desktop
+        run: npm run package:win
+        working-directory: apps/desktop
 
       - name: Build and package (macOS)
         if: matrix.os == 'macos-latest'
-        run: npm run package:mac -w apps/desktop
+        run: npm run package:mac
+        working-directory: apps/desktop
 
       - name: Upload Windows artifacts
         if: matrix.os == 'windows-latest'
@@ -93,3 +102,4 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
