@@ -170,6 +170,9 @@ export async function sendChatMessage(
           fileName: s.fileName,
           filePath: s.filePath,
           section: s.section || '',
+          pageNumber: s.pageNumber,
+          source: s.source,
+          oneDriveId: s.oneDriveId,
         })));
       }
     }

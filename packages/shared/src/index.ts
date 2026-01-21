@@ -182,6 +182,12 @@ export const IPC_CHANNELS = {
   ONEDRIVE_READ_FILE: 'onedrive-read-file',
   ONEDRIVE_DOWNLOAD_FILE: 'onedrive-download-file',
   ONEDRIVE_GET_FOLDER_INFO: 'onedrive-get-folder-info',
+  // Outlook Email Integration
+  OUTLOOK_CREATE_DRAFT: 'outlook-create-draft',
+  OUTLOOK_SEND_DRAFT: 'outlook-send-draft',
+  OUTLOOK_SEND_DIRECT: 'outlook-send-direct',
+  OUTLOOK_DELETE_DRAFT: 'outlook-delete-draft',
+  OUTLOOK_GET_DRAFTS: 'outlook-get-drafts',
   // Chat History
   CHAT_SESSION_CREATE: 'chat-session-create',
   CHAT_SESSION_UPDATE: 'chat-session-update',
@@ -572,6 +578,34 @@ export interface OneDriveAuthStatus {
   isAuthenticated: boolean;
   userEmail?: string;
   userName?: string;
+}
+
+// ==========================================
+// Outlook Email Types
+// ==========================================
+
+/**
+ * Email draft for creating/sending via Outlook
+ */
+export interface EmailDraft {
+  id?: string;
+  subject: string;
+  body: string;
+  bodyType?: 'text' | 'html';
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  importance?: 'low' | 'normal' | 'high';
+}
+
+/**
+ * Response from creating an email draft
+ */
+export interface EmailDraftResponse {
+  id: string;
+  webLink: string;
+  subject: string;
+  createdDateTime: string;
 }
 
 // ==========================================

@@ -14,6 +14,8 @@ import {
   SchematicToolResponse,
   OneDriveItem,
   OneDriveAuthStatus,
+  EmailDraft,
+  EmailDraftResponse,
   ChatSession,
   ChatSessionFull,
   ChatMessage,
@@ -520,6 +522,45 @@ const api = {
    */
   getOneDriveFolderInfo: (folderId: string): Promise<{ id: string; name: string; path: string }> => {
     return ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_FOLDER_INFO, folderId);
+  },
+
+  // ==========================================
+  // Outlook Email API
+  // ==========================================
+
+  /**
+   * Create an email draft in Outlook
+   */
+  createEmailDraft: (draft: EmailDraft): Promise<{ success: boolean; data?: EmailDraftResponse; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OUTLOOK_CREATE_DRAFT, draft);
+  },
+
+  /**
+   * Send an email draft
+   */
+  sendEmailDraft: (draftId: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OUTLOOK_SEND_DRAFT, draftId);
+  },
+
+  /**
+   * Send an email directly (without creating a draft first)
+   */
+  sendEmailDirect: (draft: EmailDraft): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OUTLOOK_SEND_DIRECT, draft);
+  },
+
+  /**
+   * Delete an email draft
+   */
+  deleteEmailDraft: (draftId: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OUTLOOK_DELETE_DRAFT, draftId);
+  },
+
+  /**
+   * Get email drafts from Outlook
+   */
+  getEmailDrafts: (limit?: number): Promise<{ success: boolean; drafts?: EmailDraftResponse[]; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OUTLOOK_GET_DRAFTS, limit);
   },
 
   // ==========================================

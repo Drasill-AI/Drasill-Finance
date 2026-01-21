@@ -37,6 +37,14 @@ import {
   getOneDriveFolderInfo,
 } from './onedrive';
 import {
+  createEmailDraft,
+  sendEmailDraft,
+  sendEmailDirect,
+  deleteEmailDraft,
+  getEmailDrafts,
+  type EmailDraft,
+} from './outlook';
+import {
   getDatabase,
   createDeal,
   updateDeal,
@@ -928,6 +936,65 @@ export function setupIpcHandlers(): void {
     } catch (error) {
       console.error('[IPC] OneDrive folder info error:', error);
       throw error;
+    }
+  });
+
+  // ==========================================
+  // Outlook Email Integration
+  // ==========================================
+
+  // Create email draft
+  ipcMain.handle(IPC_CHANNELS.OUTLOOK_CREATE_DRAFT, async (_event, draft: EmailDraft): Promise<{ success: boolean; data?: { id: string; webLink: string; subject: string; createdDateTime: string }; error?: string }> => {
+    try {
+      console.log('[IPC] Creating email draft:', draft.subject);
+      return await createEmailDraft(draft);
+    } catch (error) {
+      console.error('[IPC] Create email draft error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Send email draft
+  ipcMain.handle(IPC_CHANNELS.OUTLOOK_SEND_DRAFT, async (_event, draftId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      console.log('[IPC] Sending email draft:', draftId);
+      return await sendEmailDraft(draftId);
+    } catch (error) {
+      console.error('[IPC] Send email draft error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Send email directly (without creating draft first)
+  ipcMain.handle(IPC_CHANNELS.OUTLOOK_SEND_DIRECT, async (_event, draft: EmailDraft): Promise<{ success: boolean; error?: string }> => {
+    try {
+      console.log('[IPC] Sending email directly to:', draft.to);
+      return await sendEmailDirect(draft);
+    } catch (error) {
+      console.error('[IPC] Send email direct error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Delete email draft
+  ipcMain.handle(IPC_CHANNELS.OUTLOOK_DELETE_DRAFT, async (_event, draftId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      console.log('[IPC] Deleting email draft:', draftId);
+      return await deleteEmailDraft(draftId);
+    } catch (error) {
+      console.error('[IPC] Delete email draft error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Get email drafts
+  ipcMain.handle(IPC_CHANNELS.OUTLOOK_GET_DRAFTS, async (_event, limit?: number): Promise<{ success: boolean; drafts?: Array<{ id: string; webLink: string; subject: string; createdDateTime: string }>; error?: string }> => {
+    try {
+      console.log('[IPC] Getting email drafts');
+      return await getEmailDrafts(limit);
+    } catch (error) {
+      console.error('[IPC] Get email drafts error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 

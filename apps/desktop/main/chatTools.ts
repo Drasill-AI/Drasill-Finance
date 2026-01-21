@@ -15,6 +15,8 @@ import {
   addActivitySource,
 } from './database';
 import { processSchematicToolCall } from './schematic';
+import { createAndOpenEmailDraft, generateEmailBody, type EmailDraft } from './outlook';
+import { createOneDriveSharingLinks } from './onedrive';
 
 // ============ Tool Definitions ============
 
@@ -202,6 +204,44 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'draft_email',
+      description: 'Draft an email with a summary of research and findings from the current conversation. Use this when the user wants to send an email summarizing the discussion, analysis, or recommendations. The email will be created as a draft in Outlook with sources/citations from documents referenced in the chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'Optional deal ID to associate this email with. Used to fetch deal details for context.',
+          },
+          to: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of recipient email addresses.',
+          },
+          subject: {
+            type: 'string',
+            description: 'Email subject line.',
+          },
+          summary: {
+            type: 'string',
+            description: 'The main content/summary to include in the email body. Should be well-formatted and professional.',
+          },
+          recipient_name: {
+            type: 'string',
+            description: 'Optional name of the recipient for personalized greeting.',
+          },
+          include_sources: {
+            type: 'boolean',
+            description: 'Whether to include document citations/sources at the end of the email. Default is true.',
+          },
+        },
+        required: ['to', 'subject', 'summary'],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -319,6 +359,9 @@ export interface ChatToolContext {
     fileName: string;
     filePath: string;
     section?: string;
+    pageNumber?: number;
+    source?: 'local' | 'onedrive';
+    oneDriveId?: string;
   }>;
 }
 
@@ -355,6 +398,9 @@ export async function executeTool(
 
       case 'retrieve_schematic':
         return executeRetrieveSchematic(args);
+
+      case 'draft_email':
+        return executeDraftEmail(args, context);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -668,6 +714,135 @@ async function executeRetrieveSchematic(args: Record<string, unknown>): Promise<
     },
     message: `Retrieved schematic for ${response.component_name || componentName}${response.machine_model ? ` (${response.machine_model})` : ''}.`,
     actionTaken: 'schematic_retrieved',
+  };
+}
+
+async function executeDraftEmail(args: Record<string, unknown>, context?: ChatToolContext): Promise<ToolResult> {
+  const to = args.to as string[];
+  const subject = args.subject as string;
+  const summary = args.summary as string;
+  const recipientName = args.recipient_name as string | undefined;
+  const includeSources = args.include_sources !== false; // Default to true
+  const dealId = args.deal_id as string | undefined;
+
+  if (!to || to.length === 0) {
+    return { success: false, error: 'At least one recipient email address is required.' };
+  }
+
+  if (!subject) {
+    return { success: false, error: 'Email subject is required.' };
+  }
+
+  if (!summary) {
+    return { success: false, error: 'Email summary/body content is required.' };
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const invalidEmails = to.filter(email => !emailRegex.test(email));
+  if (invalidEmails.length > 0) {
+    return { success: false, error: `Invalid email address(es): ${invalidEmails.join(', ')}` };
+  }
+
+  // Get deal context if provided
+  let dealContext = '';
+  if (dealId) {
+    const deal = getDeal(dealId);
+    if (deal) {
+      dealContext = `\n\nDeal Reference: ${deal.borrowerName} - ${deal.dealNumber}`;
+    }
+  }
+
+  // Build sources from chat context
+  const sources = includeSources && context?.ragSources ? context.ragSources : [];
+
+  // Create OneDrive sharing links for sources that have oneDriveId
+  const oneDriveSourceIds = sources
+    .filter(s => (s as { oneDriveId?: string }).oneDriveId)
+    .map(s => (s as { oneDriveId: string }).oneDriveId);
+  
+  let sharingLinks = new Map<string, string>();
+  if (oneDriveSourceIds.length > 0) {
+    console.log('[ChatTools] Creating sharing links for', oneDriveSourceIds.length, 'OneDrive sources');
+    sharingLinks = await createOneDriveSharingLinks(oneDriveSourceIds);
+    console.log('[ChatTools] Created', sharingLinks.size, 'sharing links');
+  }
+
+  // Build sources with sharing links
+  const sourcesWithLinks = sources.map(s => {
+    const oneDriveId = (s as { oneDriveId?: string }).oneDriveId;
+    return {
+      fileName: s.fileName,
+      filePath: s.filePath,
+      section: s.section,
+      shareLink: oneDriveId ? sharingLinks.get(oneDriveId) : undefined,
+    };
+  });
+
+  // Generate email body with summary and sources (including sharing links)
+  const emailBody = generateEmailBody(
+    summary + dealContext,
+    sourcesWithLinks,
+    true,
+    recipientName
+  );
+
+  // Create the draft in Outlook AND open compose window
+  const draft: EmailDraft = {
+    to,
+    subject,
+    body: emailBody,
+    bodyType: 'text',
+  };
+
+  const result = await createAndOpenEmailDraft(draft);
+
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error || 'Failed to create email draft.',
+    };
+  }
+
+  // Log email activity if we have a deal - use current timestamp for proper ordering
+  if (dealId) {
+    try {
+      const now = new Date().toISOString();
+      const activityData = {
+        dealId,
+        type: 'email' as const,
+        description: `Email drafted to ${to.join(', ')}: "${subject}"`,
+        performedBy: null,
+        performedAt: now,
+        metadata: JSON.stringify({
+          draftId: result.data?.id,
+          recipients: to,
+          subject,
+          action: 'drafted',
+        }),
+      };
+      const activity = createDealActivity(activityData);
+      console.log('[ChatTools] Email activity logged:', activity.id);
+    } catch (err) {
+      console.error('[ChatTools] Failed to log email activity:', err);
+    }
+  }
+
+  const sourcesMsg = sources.length > 0 
+    ? ` Included ${sources.length} document citation${sources.length > 1 ? 's' : ''}.` 
+    : '';
+
+  return {
+    success: true,
+    data: {
+      draftId: result.data?.id,
+      webLink: result.data?.webLink,
+      to,
+      subject,
+      sourcesIncluded: sources.length,
+    },
+    message: `✅ Email compose window opened for ${to.join(', ')}.${sourcesMsg} Review and send from the Outlook window.`,
+    actionTaken: 'email_drafted',
   };
 }
 

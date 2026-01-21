@@ -17,7 +17,7 @@ import { URL } from 'url';
 const CLIENT_ID = 'cebfbb57-ffb1-460c-b554-00de4019ab1c';
 const REDIRECT_PORT = 3847;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
-const SCOPES = ['Files.Read', 'Files.Read.All', 'User.Read', 'offline_access'];
+const SCOPES = ['Files.Read', 'Files.Read.All', 'Files.ReadWrite.All', 'User.Read', 'Mail.ReadWrite', 'Mail.Send', 'offline_access'];
 
 // Microsoft OAuth endpoints
 const AUTHORITY = 'https://login.microsoftonline.com/common';
@@ -252,6 +252,24 @@ async function getValidAccessToken(): Promise<string | null> {
   }
 
   return null;
+}
+
+/**
+ * Get an authenticated fetch function for Microsoft Graph API
+ * Used by other modules (e.g., outlook.ts) to make authenticated requests
+ */
+export async function getAuthenticatedFetch(): Promise<typeof fetch | null> {
+  const token = await getValidAccessToken();
+  if (!token) {
+    return null;
+  }
+
+  // Return a fetch function that automatically adds the auth header
+  return (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    return fetch(url, { ...init, headers });
+  };
 }
 
 /**
@@ -718,4 +736,115 @@ export async function getOneDriveFolderInfo(folderId: string): Promise<{
     name: data.name || 'OneDrive',
     path: folderId === 'root' ? '' : `${parentPath}/${data.name}`.replace(/^\//, ''),
   };
+}
+
+/**
+ * Create a view-only sharing link for a OneDrive file
+ * Falls back to the file's webUrl if sharing link creation fails
+ * @param itemId - OneDrive item ID
+ * @returns The sharing link URL or null if failed
+ */
+export async function createOneDriveSharingLink(itemId: string): Promise<string | null> {
+  const token = await getValidAccessToken();
+  if (!token) {
+    console.error('[OneDrive] Not authenticated - cannot create sharing link');
+    return null;
+  }
+
+  try {
+    // First try to create a sharing link
+    const response = await fetch(`${GRAPH_BASE_URL}/me/drive/items/${itemId}/createLink`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'view',
+        scope: 'anonymous', // Anyone with the link can view
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[OneDrive] Created anonymous sharing link for:', itemId);
+      return data.link?.webUrl || null;
+    }
+
+    // If anonymous sharing is disabled, try organization scope
+    if (response.status === 403 || response.status === 400) {
+      console.log('[OneDrive] Anonymous sharing not allowed, trying organization scope...');
+      const orgResponse = await fetch(`${GRAPH_BASE_URL}/me/drive/items/${itemId}/createLink`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'view',
+          scope: 'organization',
+        }),
+      });
+
+      if (orgResponse.ok) {
+        const orgData = await orgResponse.json();
+        console.log('[OneDrive] Created organization sharing link for:', itemId);
+        return orgData.link?.webUrl || null;
+      }
+    }
+    
+    // Fallback: Get the file's webUrl (direct link to OneDrive)
+    console.log('[OneDrive] Sharing link failed, falling back to webUrl for:', itemId);
+    const fileResponse = await fetch(`${GRAPH_BASE_URL}/me/drive/items/${itemId}?$select=webUrl`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (fileResponse.ok) {
+      const fileData = await fileResponse.json();
+      if (fileData.webUrl) {
+        console.log('[OneDrive] Using file webUrl for:', itemId);
+        return fileData.webUrl;
+      }
+    }
+
+    console.error('[OneDrive] Failed to get any link for:', itemId);
+    return null;
+  } catch (error) {
+    console.error('[OneDrive] Error creating sharing link:', error);
+    return null;
+  }
+}
+
+/**
+ * Create sharing links for multiple OneDrive files
+ * @param itemIds - Array of OneDrive item IDs
+ * @returns Map of itemId to sharing link URL
+ */
+export async function createOneDriveSharingLinks(itemIds: string[]): Promise<Map<string, string>> {
+  const links = new Map<string, string>();
+  
+  // De-duplicate item IDs
+  const uniqueIds = [...new Set(itemIds)];
+  
+  // Create links in parallel (but limit concurrency to avoid rate limiting)
+  const batchSize = 5;
+  for (let i = 0; i < uniqueIds.length; i += batchSize) {
+    const batch = uniqueIds.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (itemId) => {
+        const link = await createOneDriveSharingLink(itemId);
+        return { itemId, link };
+      })
+    );
+    
+    for (const { itemId, link } of results) {
+      if (link) {
+        links.set(itemId, link);
+      }
+    }
+  }
+  
+  return links;
 }
