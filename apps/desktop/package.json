@@ -86,12 +86,12 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns",
-      "category": "public.app-category.developer-tools"
+      "icon": "assets/icon.ico",
+      "category": "public.app-category.finance"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.ico"
     }
   }
 }
