@@ -10,14 +10,14 @@
     "dev:vite": "vite",
     "dev:electron": "wait-on tcp:5173 && npm run build:main && npm run build:preload && electron .",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
-    "build:main": "tsc -p tsconfig.main.json",
-    "build:preload": "tsc -p tsconfig.preload.json",
+    "build:main": "npx tsc -p tsconfig.main.json",
+    "build:preload": "npx tsc -p tsconfig.preload.json",
     "build:renderer": "vite build",
-    "postinstall": "npx @electron/rebuild",
+    "postinstall": "npx @electron/rebuild && npx electron-builder install-app-deps",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
-    "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.renderer.json"
+    "typecheck": "npx tsc --noEmit -p tsconfig.main.json && npx tsc --noEmit -p tsconfig.preload.json && npx tsc --noEmit -p tsconfig.renderer.json"
   },
   "dependencies": {
     "@drasill/shared": "*",
