@@ -2,22 +2,76 @@ import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { CommandPalette } from './components/CommandPalette';
 import { Toast } from './components/Toast';
+import { AuthScreen } from './components/AuthScreen';
+import { SubscriptionGate } from './components/SubscriptionGate';
 import { useAppStore } from './store';
 import { setupPdfExtractionListener } from './utils/pdfExtractor';
+
+interface User {
+  id: string;
+  email: string;
+}
+
+interface Subscription {
+  status: string;
+  hasActiveSubscription: boolean;
+  plan?: string;
+  current_period_end?: string;
+}
 
 function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      console.log('App useEffect running...');
-      setReady(true);
-    } catch (err) {
-      console.error('Error in App:', err);
-      setError(String(err));
-    }
+    const initAuth = async () => {
+      try {
+        console.log('Initializing auth...');
+        // Initialize Supabase and restore session if exists
+        await window.electronAPI.authInit();
+        
+        // Check if user is logged in
+        const currentUser = await window.electronAPI.authGetCurrentUser();
+        if (currentUser) {
+          setUser(currentUser);
+          
+          // Check subscription status
+          const subStatus = await window.electronAPI.authCheckSubscription();
+          setSubscription(subStatus);
+        }
+        
+        setReady(true);
+      } catch (err) {
+        console.error('Error in auth init:', err);
+        // Don't block the app on auth errors - just proceed without auth
+        setReady(true);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    
+    initAuth();
   }, []);
+
+  const handleAuthSuccess = async (authenticatedUser: User) => {
+    setUser(authenticatedUser);
+    // Check subscription after login
+    const subStatus = await window.electronAPI.authCheckSubscription();
+    setSubscription(subStatus);
+  };
+
+  const handleSignOut = async () => {
+    await window.electronAPI.authSignOut();
+    setUser(null);
+    setSubscription(null);
+  };
+
+  const handleUpgrade = async () => {
+    await window.electronAPI.authOpenCheckout();
+  };
 
   // Show loading state until ready
   if (error) {
@@ -38,7 +92,7 @@ function App() {
     );
   }
 
-  if (!ready) {
+  if (!ready || authLoading) {
     return (
       <div style={{ 
         width: '100vw', 
@@ -56,10 +110,22 @@ function App() {
     );
   }
 
-  return <AppContent />;
+  // Show auth screen if not logged in
+  if (!user) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  // User is authenticated - go straight to app
+  return <AppContent user={user} subscription={subscription} onSignOut={handleSignOut} />;
 }
 
-function AppContent() {
+interface AppContentProps {
+  user: User;
+  subscription: Subscription | null;
+  onSignOut: () => void;
+}
+
+function AppContent({ user, subscription, onSignOut }: AppContentProps) {
   const { 
     openWorkspace, 
     closeActiveTab, 
@@ -89,6 +155,10 @@ function AppContent() {
       toggleCommandPalette();
     });
 
+    const unsubscribeSignOut = window.electronAPI.onMenuSignOut(() => {
+      onSignOut();
+    });
+
     // Keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
@@ -114,9 +184,10 @@ function AppContent() {
       unsubscribeOpenWorkspace();
       unsubscribeCloseTab();
       unsubscribeCommandPalette();
+      unsubscribeSignOut();
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [openWorkspace, closeActiveTab, toggleCommandPalette, isCommandPaletteOpen]);
+  }, [openWorkspace, closeActiveTab, toggleCommandPalette, isCommandPaletteOpen, onSignOut]);
 
   console.log('App rendering...');
 

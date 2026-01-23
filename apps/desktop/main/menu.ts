@@ -44,6 +44,13 @@ export function createMenu(mainWindow: BrowserWindow | null): Menu {
           },
         },
         { type: 'separator' },
+        {
+          label: 'Sign Out',
+          click: () => {
+            mainWindow?.webContents.send('menu:sign-out');
+          },
+        },
+        { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },

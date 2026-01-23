@@ -1,48 +1,33 @@
-import OpenAI from 'openai';
 import { BrowserWindow } from 'electron';
 import { ChatRequest, IPC_CHANNELS, FileContext } from '@drasill/shared';
 import { getRAGContext, getIndexingStatus } from './rag';
-import * as keychain from './keychain';
 import { CHAT_TOOLS, executeTool, buildDealContext, ChatToolContext } from './chatTools';
+import { proxyChatRequest, getSession } from './supabase';
 
-let openai: OpenAI | null = null;
 let abortController: AbortController | null = null;
 
 /**
- * Initialize OpenAI client with stored API key
- */
-async function initializeOpenAI(): Promise<boolean> {
-  const apiKey = await keychain.getApiKey();
-  if (apiKey) {
-    openai = new OpenAI({ apiKey });
-    return true;
-  }
-  return false;
-}
-
-/**
- * Set the OpenAI API key (stores in OS keychain)
- */
-export async function setApiKey(apiKey: string): Promise<boolean> {
-  const success = await keychain.setApiKey(apiKey);
-  if (success) {
-    openai = new OpenAI({ apiKey });
-  }
-  return success;
-}
-
-/**
- * Get the OpenAI API key (masked)
- */
-export async function getApiKey(): Promise<string | null> {
-  return keychain.getMaskedApiKey();
-}
-
-/**
- * Check if API key is configured
+ * Check if user is authenticated (replaces API key check)
  */
 export async function hasApiKey(): Promise<boolean> {
-  return keychain.hasApiKey();
+  const session = await getSession();
+  return session !== null;
+}
+
+/**
+ * Get masked API key info (for display - now shows auth status)
+ */
+export async function getApiKey(): Promise<string | null> {
+  const session = await getSession();
+  return session ? 'Using Drasill Cloud API' : null;
+}
+
+/**
+ * Set API key - no longer needed with proxy, but kept for compatibility
+ */
+export async function setApiKey(_apiKey: string): Promise<boolean> {
+  // No longer needed - using cloud proxy
+  return true;
 }
 
 /**
@@ -136,10 +121,11 @@ export async function sendChatMessage(
   window: BrowserWindow,
   request: ChatRequest
 ): Promise<void> {
-  // Initialize if needed (now async for keychain access)
-  if (!openai && !(await initializeOpenAI())) {
+  // Check if authenticated
+  const session = await getSession();
+  if (!session) {
     window.webContents.send(IPC_CHANNELS.CHAT_STREAM_ERROR, {
-      error: 'OpenAI API key not configured. Please set your API key in settings.',
+      error: 'Not authenticated. Please sign in to use chat.',
     });
     return;
   }
@@ -178,7 +164,7 @@ export async function sendChatMessage(
     }
     
     // Build messages array
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
+    const messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [
       { role: 'system', content: systemPrompt },
       ...request.history.map((msg) => ({
         role: msg.role as 'user' | 'assistant',
@@ -187,21 +173,12 @@ export async function sendChatMessage(
       { role: 'user', content: request.message },
     ];
 
-    // First call - may return tool calls
-    let response = await openai!.chat.completions.create(
-      {
-        model: 'gpt-4o-mini',
-        messages,
-        tools: CHAT_TOOLS,
-        tool_choice: 'auto',
-        max_tokens: 2048,
-        temperature: 0.7,
-      },
-      { signal: abortController.signal }
-    );
+    // Convert CHAT_TOOLS to the format expected by the API
+    const tools = CHAT_TOOLS.map(tool => ({
+      type: 'function' as const,
+      function: tool.function,
+    }));
 
-    let assistantMessage = response.choices[0].message;
-    
     // Build tool context with cumulative RAG sources for activity creation
     const toolContext: ChatToolContext = {
       ragSources: allRagSources,
@@ -209,68 +186,82 @@ export async function sendChatMessage(
     
     // Handle tool calls iteratively (max 5 iterations to prevent infinite loops)
     let iterations = 0;
-    while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 5) {
+    let continueLoop = true;
+    
+    while (continueLoop && iterations < 5) {
       iterations++;
       
-      // Add assistant message with tool calls to conversation
-      messages.push(assistantMessage);
-      
-      // Execute each tool call
-      for (const toolCall of assistantMessage.tool_calls) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(toolCall.function.arguments);
-        } catch (e) {
-          console.error('Failed to parse tool arguments:', e);
-        }
-        
-        const result = await executeTool(toolCall.function.name, args, toolContext);
-        
-        // Notify renderer if action was taken
-        if (result.actionTaken) {
-          window.webContents.send('chat-tool-executed', {
-            action: result.actionTaken,
-            data: result.data,
-          });
-        }
-        
-        // Add tool result to messages
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(result),
-        });
-      }
-      
-      // Get next response
-      response = await openai!.chat.completions.create(
+      // Call via proxy
+      const response = await proxyChatRequest(
+        messages,
         {
           model: 'gpt-4o-mini',
-          messages,
-          tools: CHAT_TOOLS,
+          tools,
           tool_choice: 'auto',
           max_tokens: 2048,
           temperature: 0.7,
         },
-        { signal: abortController.signal }
+        undefined, // No streaming callback for tool calls
+        abortController.signal
       );
-      
-      assistantMessage = response.choices[0].message;
-    }
 
-    // Stream the final text response
-    if (assistantMessage.content) {
-      // Send as chunks for consistency with streaming UI
-      const content = assistantMessage.content;
-      const chunkSize = 20;
-      for (let i = 0; i < content.length; i += chunkSize) {
-        window.webContents.send(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
-          id: messageId,
-          delta: content.slice(i, i + chunkSize),
-          done: false,
+      if (!response.success) {
+        throw new Error(response.error || 'Chat request failed');
+      }
+
+      // Check if we have tool calls to process
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        // Add assistant message with tool calls to conversation
+        messages.push({
+          role: 'assistant',
+          content: response.content || null,
+          tool_calls: response.tool_calls,
         });
-        // Small delay for smooth streaming effect
-        await new Promise(resolve => setTimeout(resolve, 10));
+        
+        // Execute each tool call
+        for (const toolCall of response.tool_calls) {
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch (e) {
+            console.error('Failed to parse tool arguments:', e);
+          }
+          
+          const result = await executeTool(toolCall.function.name, args, toolContext);
+          
+          // Notify renderer if action was taken
+          if (result.actionTaken) {
+            window.webContents.send('chat-tool-executed', {
+              action: result.actionTaken,
+              data: result.data,
+            });
+          }
+          
+          // Add tool result to messages
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          });
+        }
+      } else {
+        // No tool calls - we have the final response
+        continueLoop = false;
+        
+        // Stream the final text response
+        if (response.content) {
+          const content = response.content;
+          const chunkSize = 20;
+          for (let i = 0; i < content.length; i += chunkSize) {
+            window.webContents.send(IPC_CHANNELS.CHAT_STREAM_CHUNK, {
+              id: messageId,
+              delta: content.slice(i, i + chunkSize),
+              done: false,
+            });
+            // Small delay for smooth streaming effect
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        }
       }
     }
 
@@ -279,7 +270,7 @@ export async function sendChatMessage(
       id: messageId,
     });
   } catch (error) {
-    if ((error as Error).name === 'AbortError') {
+    if ((error as Error).name === 'AbortError' || (error as Error).message === 'Request cancelled') {
       // Stream was cancelled
       window.webContents.send(IPC_CHANNELS.CHAT_STREAM_END, {
         id: messageId,

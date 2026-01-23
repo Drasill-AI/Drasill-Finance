@@ -185,7 +185,6 @@ export function RightPanel() {
   const [showSettings, setShowSettings] = useState(false);
   const [showContextSelector, setShowContextSelector] = useState(false);
   const [selectedContextPaths, setSelectedContextPaths] = useState<Set<string>>(new Set());
-  const [apiKeyInput, setApiKeyInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
@@ -193,11 +192,9 @@ export function RightPanel() {
     chatMessages,
     isChatLoading,
     chatError,
-    hasApiKey,
     sendMessage,
     clearChat,
     cancelChat,
-    setApiKey,
     activeTabId,
     tabs,
     fileContents,
@@ -304,14 +301,6 @@ export function RightPanel() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-    }
-  };
-
-  const handleSaveApiKey = () => {
-    if (apiKeyInput.trim()) {
-      setApiKey(apiKeyInput.trim());
-      setApiKeyInput('');
-      setShowSettings(false);
     }
   };
 
@@ -433,12 +422,12 @@ export function RightPanel() {
     return <div className={styles.markdownContent}>{parseMarkdown(content)}</div>;
   }, [handleCitationClick]);
 
-  // Settings modal
+  // Settings modal (RAG settings only)
   if (showSettings) {
     return (
       <div className={styles.panel}>
         <div className={styles.header}>
-          <span className={styles.title}>API SETTINGS</span>
+          <span className={styles.title}>SETTINGS</span>
           <button 
             className={styles.closeButton}
             onClick={() => setShowSettings(false)}
@@ -448,30 +437,6 @@ export function RightPanel() {
         </div>
         <div className={styles.settingsContent}>
           <div className={styles.settingsForm}>
-            <label className={styles.label}>OpenAI API Key</label>
-            <input
-              type="password"
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder="sk-..."
-              className={styles.input}
-            />
-            <p className={styles.hint}>
-              Your API key is encrypted and stored locally on your device.
-            </p>
-            <button 
-              className={styles.saveButton}
-              onClick={handleSaveApiKey}
-              disabled={!apiKeyInput.trim()}
-            >
-              Save API Key
-            </button>
-            {hasApiKey && (
-              <p className={styles.success}>✓ API key is configured</p>
-            )}
-
-            {/* RAG Settings */}
-            <div className={styles.divider} />
             <label className={styles.label}>Knowledge Base</label>
             {ragChunksCount > 0 ? (
               <>
@@ -482,7 +447,7 @@ export function RightPanel() {
                   <button 
                     className={styles.reindexButton}
                     onClick={() => { indexWorkspace(); setShowSettings(false); }}
-                    disabled={isIndexing || !hasApiKey}
+                    disabled={isIndexing}
                   >
                     Re-index
                   </button>
@@ -503,7 +468,7 @@ export function RightPanel() {
                 <button 
                   className={styles.indexButton}
                   onClick={() => { indexWorkspace(); setShowSettings(false); }}
-                  disabled={isIndexing || !hasApiKey || !workspacePath}
+                  disabled={isIndexing || !workspacePath}
                 >
                   {!workspacePath ? 'Open a workspace first' : 'Index Workspace'}
                 </button>
@@ -644,15 +609,7 @@ export function RightPanel() {
             <img src={lonnieLogo} alt="Lonnie" className={styles.lonnieIcon} />
             <h3>Lonnie - Deal Assistant</h3>
             <p>Ask questions about your deals and documents</p>
-            {!hasApiKey && (
-              <button 
-                className={styles.configureButton}
-                onClick={() => setShowSettings(true)}
-              >
-                Configure API Key
-              </button>
-            )}
-            {hasApiKey && ragChunksCount === 0 && workspacePath && (
+            {ragChunksCount === 0 && workspacePath && (
               <button 
                 className={styles.indexButton}
                 onClick={() => indexWorkspace()}
@@ -661,12 +618,12 @@ export function RightPanel() {
                 {isIndexing ? 'Indexing...' : 'Index Workspace for AI'}
               </button>
             )}
-            {hasApiKey && ragChunksCount > 0 && (
+            {ragChunksCount > 0 && (
               <p className={styles.ragHint}>
                 📚 {ragChunksCount} chunks indexed - Ready to answer questions!
               </p>
             )}
-            {hasApiKey && fileContext && (
+            {fileContext && (
               <p className={styles.contextHint}>
                 Currently viewing: {fileContext.fileName}
               </p>
@@ -750,15 +707,15 @@ export function RightPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={hasApiKey ? "Ask a question... (Ctrl+/)" : "Configure API key first..."}
+          placeholder="Ask a question... (Ctrl+/)"
           className={styles.input}
-          disabled={!hasApiKey || isChatLoading}
+          disabled={isChatLoading}
           rows={1}
         />
         <button 
           className={styles.sendButton} 
           onClick={handleSend}
-          disabled={!hasApiKey || !input.trim() || isChatLoading}
+          disabled={!input.trim() || isChatLoading}
         >
           {isChatLoading ? '...' : 'Send'}
         </button>

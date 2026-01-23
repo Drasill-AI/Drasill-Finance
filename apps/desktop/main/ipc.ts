@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { ipcMain, dialog, BrowserWindow, shell } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import Store from 'electron-store';
@@ -44,6 +44,16 @@ import {
   getEmailDrafts,
   type EmailDraft,
 } from './outlook';
+import {
+  initSupabase,
+  initAuthState,
+  signUp,
+  signIn,
+  signOut,
+  getCurrentUser,
+  checkSubscription,
+  createCheckoutSession,
+} from './supabase';
 import {
   getDatabase,
   createDeal,
@@ -856,6 +866,91 @@ export function setupIpcHandlers(): void {
       }
     }
   );
+
+  // ==========================================
+  // Supabase Authentication
+  // ==========================================
+
+  // Initialize auth state (restore session)
+  ipcMain.handle('auth:init', async () => {
+    try {
+      initSupabase();
+      const result = await initAuthState();
+      if (result) {
+        return { success: true, user: result.user };
+      }
+      return { success: false, user: null };
+    } catch (error) {
+      console.error('[IPC] Auth init error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Sign up
+  ipcMain.handle('auth:signUp', async (_event, email: string, password: string, fullName?: string) => {
+    try {
+      return await signUp(email, password, fullName);
+    } catch (error) {
+      console.error('[IPC] Sign up error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Sign in
+  ipcMain.handle('auth:signIn', async (_event, email: string, password: string) => {
+    try {
+      return await signIn(email, password);
+    } catch (error) {
+      console.error('[IPC] Sign in error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Sign out
+  ipcMain.handle('auth:signOut', async () => {
+    try {
+      return await signOut();
+    } catch (error) {
+      console.error('[IPC] Sign out error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Get current user
+  ipcMain.handle('auth:getCurrentUser', async () => {
+    try {
+      return await getCurrentUser();
+    } catch (error) {
+      console.error('[IPC] Get current user error:', error);
+      return null;
+    }
+  });
+
+  // Check subscription status
+  ipcMain.handle('auth:checkSubscription', async () => {
+    try {
+      return await checkSubscription();
+    } catch (error) {
+      console.error('[IPC] Check subscription error:', error);
+      return { hasActiveSubscription: false, subscription: null, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Open Stripe checkout
+  ipcMain.handle('auth:openCheckout', async () => {
+    try {
+      const { url, error } = await createCheckoutSession();
+      if (error || !url) {
+        console.error('[IPC] Checkout error:', error);
+        return { success: false, error };
+      }
+      await shell.openExternal(url);
+      return { success: true };
+    } catch (error) {
+      console.error('[IPC] Checkout error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
 
   // ==========================================
   // OneDrive Integration

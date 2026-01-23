@@ -146,6 +146,12 @@ const api = {
     return () => ipcRenderer.removeListener('menu:command-palette', handler);
   },
 
+  onMenuSignOut: (callback: () => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent) => callback();
+    ipcRenderer.on('menu:sign-out', handler);
+    return () => ipcRenderer.removeListener('menu:sign-out', handler);
+  },
+
   // Chat API
   /**
    * Send a chat message (initiates streaming response)
@@ -618,6 +624,59 @@ const api = {
    */
   addChatMessage: (sessionId: string, message: ChatMessage): Promise<ChatMessage> => {
     return ipcRenderer.invoke(IPC_CHANNELS.CHAT_SESSION_ADD_MESSAGE, sessionId, message);
+  },
+
+  // ==========================================
+  // Authentication
+  // ==========================================
+
+  /**
+   * Initialize auth state (restore session on app start)
+   */
+  authInit: (): Promise<{ success: boolean; user?: any; error?: string }> => {
+    return ipcRenderer.invoke('auth:init');
+  },
+
+  /**
+   * Sign up with email and password
+   */
+  authSignUp: (email: string, password: string, fullName?: string): Promise<{ success: boolean; user?: any; error?: string }> => {
+    return ipcRenderer.invoke('auth:signUp', email, password, fullName);
+  },
+
+  /**
+   * Sign in with email and password
+   */
+  authSignIn: (email: string, password: string): Promise<{ success: boolean; user?: any; error?: string }> => {
+    return ipcRenderer.invoke('auth:signIn', email, password);
+  },
+
+  /**
+   * Sign out
+   */
+  authSignOut: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('auth:signOut');
+  },
+
+  /**
+   * Get current user
+   */
+  authGetCurrentUser: (): Promise<{ user: any; session: any } | null> => {
+    return ipcRenderer.invoke('auth:getCurrentUser');
+  },
+
+  /**
+   * Check subscription status
+   */
+  authCheckSubscription: (): Promise<{ hasActiveSubscription: boolean; subscription: any; error?: string }> => {
+    return ipcRenderer.invoke('auth:checkSubscription');
+  },
+
+  /**
+   * Open Stripe checkout
+   */
+  authOpenCheckout: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('auth:openCheckout');
   },
 };
 

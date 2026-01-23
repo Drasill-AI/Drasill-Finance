@@ -17,7 +17,6 @@ interface AppState {
   chatMessages: ChatMessage[];
   isChatLoading: boolean;
   chatError: string | null;
-  hasApiKey: boolean;
   
   // Chat History
   chatSessions: ChatSession[];
@@ -88,8 +87,6 @@ interface AppState {
   dismissToast: (id: string) => void;
 
   // Chat actions
-  checkApiKey: () => Promise<void>;
-  setApiKey: (key: string) => Promise<void>;
   sendMessage: (content: string, fileContext?: FileContext) => Promise<void>;
   clearChat: () => void;
   cancelChat: () => void;
@@ -158,7 +155,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatMessages: [],
   isChatLoading: false,
   chatError: null,
-  hasApiKey: false,
   
   // Chat History state
   chatSessions: [],
@@ -583,23 +579,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Chat actions
-  checkApiKey: async () => {
-    try {
-      const result = await window.electronAPI.getApiKey();
-      set({ hasApiKey: result.hasKey });
-    } catch {
-      set({ hasApiKey: false });
-    }
-  },
-
-  setApiKey: async (key: string) => {
-    try {
-      await window.electronAPI.setApiKey(key);
-      set({ hasApiKey: true, chatError: null });
-    } catch (error) {
-      set({ chatError: 'Failed to save API key' });
-    }
-  },
 
   sendMessage: async (content: string, fileContext?: FileContext) => {
     // Auto-create session if needed
@@ -839,15 +818,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // RAG actions
   indexWorkspace: async (forceReindex = false) => {
-    const { workspacePath, hasApiKey, workspaceSource, oneDriveFolderId } = get();
-    console.log('[Store] indexWorkspace called:', { workspacePath, hasApiKey, workspaceSource, oneDriveFolderId, forceReindex });
+    const { workspacePath, workspaceSource, oneDriveFolderId } = get();
+    console.log('[Store] indexWorkspace called:', { workspacePath, workspaceSource, oneDriveFolderId, forceReindex });
     
     if (!workspacePath) {
       get().showToast('error', 'No workspace open');
-      return;
-    }
-    if (!hasApiKey) {
-      get().showToast('error', 'Please configure your API key first');
       return;
     }
 
@@ -1392,7 +1367,6 @@ console.log('[Store] Initializing store...');
 console.log('[Store] window.electronAPI:', typeof window.electronAPI);
 
 try {
-  useAppStore.getState().checkApiKey();
   useAppStore.getState().checkRagStatus();
   useAppStore.getState().checkOneDriveStatus();
   useAppStore.getState().loadPersistedState();

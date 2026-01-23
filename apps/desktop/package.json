@@ -22,6 +22,7 @@
   "dependencies": {
     "@drasill/shared": "*",
     "@electron/rebuild": "^4.0.2",
+    "@supabase/supabase-js": "^2.91.0",
     "better-sqlite3": "^12.5.0",
     "electron-store": "^8.2.0",
     "keytar": "^7.9.0",
