@@ -139,3 +139,73 @@
 .toggle button:hover {
   color: #6ba3ff;
 }
+
+.forgotPassword {
+  background: none;
+  border: none;
+  color: #4C8DFF;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-align: right;
+  margin-bottom: 16px;
+  display: block;
+  width: 100%;
+}
+
+.forgotPassword:hover {
+  color: #6ba3ff;
+  text-decoration: underline;
+}
+
+.backLink {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 12px 0 0 0;
+  text-align: center;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.backLink:hover {
+  color: #4C8DFF;
+}
+
+.formSubtext {
+  color: #888;
+  font-size: 14px;
+  text-align: center;
+  margin: 0 0 24px 0;
+  line-height: 1.5;
+}
+
+.successMessage {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.successMessage svg {
+  width: 48px;
+  height: 48px;
+  color: #34d399;
+  margin-bottom: 16px;
+}
+
+.successMessage p {
+  color: #fff;
+  font-size: 14px;
+  margin: 0 0 8px 0;
+  line-height: 1.5;
+}
+
+.successMessage strong {
+  color: #4C8DFF;
+}
+
+.subtext {
+  color: #888 !important;
+  font-size: 13px !important;
+}

@@ -4,6 +4,8 @@ import * as path from 'path';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { IPC_CHANNELS, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, IGNORED_PATTERNS } from '@drasill/shared';
 import * as keychain from './keychain';
+import { getDealsForDocument, getDealDocuments, getRelevanceThresholds } from './database';
+import { incrementUsage } from './usage';
 
 // For Word doc parsing
 import mammoth from 'mammoth';
@@ -756,6 +758,11 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
     
     isIndexing = false;
     
+    // Track documents indexed for usage
+    for (let i = 0; i < files.length; i++) {
+      incrementUsage('documents_indexed');
+    }
+    
     // Send completion
     window.webContents.send(IPC_CHANNELS.RAG_INDEX_COMPLETE, {
       chunksIndexed: chunks.length,
@@ -992,6 +999,11 @@ export async function indexOneDriveWorkspace(
     
     isIndexing = false;
     
+    // Track documents indexed for usage
+    for (let i = 0; i < files.length; i++) {
+      incrementUsage('documents_indexed');
+    }
+    
     window.webContents.send(IPC_CHANNELS.RAG_INDEX_COMPLETE, {
       chunksIndexed: chunks.length,
       filesIndexed: files.length,
@@ -1041,8 +1053,11 @@ async function extractPdfFromBase64(base64Data: string, window: BrowserWindow, f
 /**
  * Search the vector store for relevant chunks using hybrid search (BM25 + vector)
  * Combines semantic similarity with keyword matching for better results
+ * @param query - The search query
+ * @param topK - Maximum number of results to return
+ * @param dealId - Optional deal ID to prioritize documents associated with this deal
  */
-export async function searchRAG(query: string, topK = 5): Promise<{ chunks: Array<{ content: string; fileName: string; filePath: string; score: number; chunkIndex: number; totalChunks: number; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string }> }> {
+export async function searchRAG(query: string, topK = 5, dealId?: string): Promise<{ chunks: Array<{ content: string; fileName: string; filePath: string; score: number; chunkIndex: number; totalChunks: number; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; fromOtherDeal?: boolean; dealIds?: string[] }> }> {
   if (!vectorStore || vectorStore.chunks.length === 0) {
     return { chunks: [] };
   }
@@ -1050,6 +1065,14 @@ export async function searchRAG(query: string, topK = 5): Promise<{ chunks: Arra
   try {
     const queryEmbedding = await getEmbedding(query);
     const queryTokens = tokenize(query);
+    
+    // Get deal's associated document paths for filtering
+    let dealDocPaths: Set<string> | null = null;
+    if (dealId) {
+      const dealDocs = getDealDocuments(dealId);
+      dealDocPaths = new Set(dealDocs.map(d => d.filePath));
+      console.log(`[RAG] Deal-scoped search: ${dealDocPaths.size} associated document paths for deal ${dealId}`);
+    }
     
     // Pre-compute document frequencies for BM25
     const docFrequencies = new Map<string, number>();
@@ -1091,22 +1114,51 @@ export async function searchRAG(query: string, topK = 5): Promise<{ chunks: Arra
       // Combine scores with weights
       const hybridScore = (VECTOR_WEIGHT * vectorScore) + (BM25_WEIGHT * normalizedBM25);
       
+      // Check deal association
+      const chunkDealIds = getDealsForDocument(chunk.filePath);
+      const fromOtherDeal = dealId ? !chunkDealIds.includes(dealId) && !isPathUnderDealFolder(chunk.filePath, dealDocPaths) : false;
+      
       return {
         ...chunk,
         score: hybridScore,
         vectorScore,
         bm25Score: normalizedBM25,
+        fromOtherDeal,
+        dealIds: chunkDealIds,
       };
     });
     
-    // Sort by hybrid score
-    scored.sort((a, b) => b.score - a.score);
+    // Sort: prioritize current deal's documents, then by score
+    scored.sort((a, b) => {
+      if (dealId) {
+        // Current deal documents come first
+        if (!a.fromOtherDeal && b.fromOtherDeal) return -1;
+        if (a.fromOtherDeal && !b.fromOtherDeal) return 1;
+      }
+      return b.score - a.score;
+    });
     
     // Apply relevance threshold and take top K
     const relevantChunks = scored.filter(c => c.score >= MIN_RELEVANCE_THRESHOLD);
-    const topChunks = relevantChunks.slice(0, Math.max(topK, 3)); // At least 3 results if available
     
-    console.log(`[RAG] Hybrid search: ${relevantChunks.length} relevant results (threshold: ${MIN_RELEVANCE_THRESHOLD}), returning top ${topChunks.length}`);
+    // If deal-scoped and we have few results from current deal, include some from other deals
+    let topChunks: typeof relevantChunks;
+    if (dealId) {
+      const currentDealChunks = relevantChunks.filter(c => !c.fromOtherDeal);
+      const otherDealChunks = relevantChunks.filter(c => c.fromOtherDeal);
+      
+      if (currentDealChunks.length >= topK) {
+        topChunks = currentDealChunks.slice(0, topK);
+      } else {
+        // Fill with other deal chunks if needed
+        const needed = topK - currentDealChunks.length;
+        topChunks = [...currentDealChunks, ...otherDealChunks.slice(0, needed)];
+      }
+    } else {
+      topChunks = relevantChunks.slice(0, Math.max(topK, 3));
+    }
+    
+    console.log(`[RAG] Hybrid search: ${relevantChunks.length} relevant results (threshold: ${MIN_RELEVANCE_THRESHOLD}), returning top ${topChunks.length}${dealId ? ` (${topChunks.filter(c => !c.fromOtherDeal).length} from current deal)` : ''}`);
     
     return {
       chunks: topChunks.map(c => ({
@@ -1119,6 +1171,8 @@ export async function searchRAG(query: string, topK = 5): Promise<{ chunks: Arra
         pageNumber: c.pageNumber,
         source: c.source,
         oneDriveId: c.oneDriveId,
+        fromOtherDeal: c.fromOtherDeal,
+        dealIds: c.dealIds,
       })),
     };
   } catch (error) {
@@ -1128,26 +1182,56 @@ export async function searchRAG(query: string, topK = 5): Promise<{ chunks: Arra
 }
 
 /**
- * Get RAG context for a chat query
- * Returns context with structured source citations
+ * Helper to check if a file path is under any deal folder path
  */
-export async function getRAGContext(query: string): Promise<{ context: string; sources: Array<{ fileName: string; filePath: string; section: string; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string }> }> {
-  const results = await searchRAG(query, 5);
+function isPathUnderDealFolder(filePath: string, dealDocPaths: Set<string> | null): boolean {
+  if (!dealDocPaths || dealDocPaths.size === 0) return false;
+  
+  const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+  for (const docPath of dealDocPaths) {
+    const normalizedDocPath = docPath.toLowerCase().replace(/\\/g, '/');
+    if (normalizedPath.startsWith(normalizedDocPath) || normalizedPath.includes(normalizedDocPath)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Get RAG context for a chat query
+ * Returns context with structured source citations including relevance scores
+ * @param query - The search query
+ * @param dealId - Optional deal ID to prioritize documents associated with this deal
+ */
+export async function getRAGContext(query: string, dealId?: string): Promise<{ context: string; sources: Array<{ fileName: string; filePath: string; section: string; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; relevanceScore?: number; fromOtherDeal?: boolean; dealId?: string }> }> {
+  const { displayThreshold } = getRelevanceThresholds();
+  const results = await searchRAG(query, 5, dealId);
   
   if (results.chunks.length === 0) {
     return { context: '', sources: [] };
   }
   
+  // Filter by display threshold
+  const filteredChunks = results.chunks.filter(c => c.score >= displayThreshold);
+  
+  if (filteredChunks.length === 0) {
+    console.log(`[RAG] All chunks below display threshold (${displayThreshold})`);
+    return { context: '', sources: [] };
+  }
+  
   // Build context string with source attribution
   // Use a numbered reference format that the AI can cite
-  const sources: Array<{ fileName: string; filePath: string; section: string; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string }> = [];
-  const contextParts = results.chunks.map((chunk, index) => {
+  const sources: Array<{ fileName: string; filePath: string; section: string; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; relevanceScore?: number; fromOtherDeal?: boolean; dealId?: string }> = [];
+  const contextParts = filteredChunks.map((chunk, index) => {
     // For PDFs with page numbers, include the page
     const sectionLabel = chunk.pageNumber 
       ? `Page ${chunk.pageNumber}`
       : chunk.totalChunks > 1 
         ? `Section ${chunk.chunkIndex + 1}/${chunk.totalChunks}`
         : 'Full Document';
+    
+    // Add label for sources from other deals
+    const otherDealLabel = chunk.fromOtherDeal ? ' [FROM OTHER DEAL]' : '';
     
     sources.push({
       fileName: chunk.fileName,
@@ -1156,9 +1240,12 @@ export async function getRAGContext(query: string): Promise<{ context: string; s
       pageNumber: chunk.pageNumber,
       source: chunk.source,
       oneDriveId: chunk.oneDriveId,
+      relevanceScore: chunk.score,
+      fromOtherDeal: chunk.fromOtherDeal,
+      dealId: chunk.dealIds?.[0],
     });
     
-    return `[${index + 1}] ${chunk.fileName} (${sectionLabel})\n${chunk.content}`;
+    return `[${index + 1}] ${chunk.fileName} (${sectionLabel})${otherDealLabel}\n${chunk.content}`;
   });
   
   return {

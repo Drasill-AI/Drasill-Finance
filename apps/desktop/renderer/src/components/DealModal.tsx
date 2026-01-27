@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { Deal, DealStage, DealPriority } from '@drasill/shared';
+import { MemoGenerator } from './MemoGenerator';
 import styles from './DealModal.module.css';
 
 const DEAL_STAGES: { value: DealStage; label: string }[] = [
@@ -23,9 +24,14 @@ export function DealModal() {
   const { 
     isDealModalOpen, 
     setDealModalOpen, 
+    editingDeal,
+    setEditingDeal,
     showToast,
     loadDeals,
   } = useAppStore();
+
+  const isEditMode = !!editingDeal;
+  const [isCloneMode, setIsCloneMode] = useState(false);
 
   const [formData, setFormData] = useState({
     borrowerName: '',
@@ -39,28 +45,71 @@ export function DealModal() {
     assignedTo: '',
     expectedCloseDate: '',
     notes: '',
+    documentPath: '',
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showMemoGenerator, setShowMemoGenerator] = useState(false);
 
-  // Reset form when modal opens
+  // Populate form when modal opens or editingDeal changes
   useEffect(() => {
     if (isDealModalOpen) {
-      setFormData({
-        borrowerName: '',
-        borrowerContact: '',
-        loanAmount: '',
-        interestRate: '',
-        termMonths: '',
-        collateralDescription: '',
-        stage: 'lead',
-        priority: 'medium',
-        assignedTo: '',
-        expectedCloseDate: '',
-        notes: '',
-      });
+      if (editingDeal) {
+        // Edit mode - populate with existing deal data
+        setFormData({
+          borrowerName: editingDeal.borrowerName || '',
+          borrowerContact: editingDeal.borrowerContact || '',
+          loanAmount: editingDeal.loanAmount?.toString() || '',
+          interestRate: editingDeal.interestRate?.toString() || '',
+          termMonths: editingDeal.termMonths?.toString() || '',
+          collateralDescription: editingDeal.collateralDescription || '',
+          stage: editingDeal.stage || 'lead',
+          priority: editingDeal.priority || 'medium',
+          assignedTo: editingDeal.assignedTo || '',
+          expectedCloseDate: editingDeal.expectedCloseDate || '',
+          notes: editingDeal.notes || '',
+          documentPath: editingDeal.documentPath || '',
+        });
+      } else {
+        // Add mode - reset form
+        setFormData({
+          borrowerName: '',
+          borrowerContact: '',
+          loanAmount: '',
+          interestRate: '',
+          termMonths: '',
+          collateralDescription: '',
+          stage: 'lead',
+          priority: 'medium',
+          assignedTo: '',
+          expectedCloseDate: '',
+          notes: '',
+          documentPath: '',
+        });
+        setIsCloneMode(false);
+      }
+      setShowDeleteConfirm(false);
     }
-  }, [isDealModalOpen]);
+  }, [isDealModalOpen, editingDeal]);
+
+  const handleClose = () => {
+    setDealModalOpen(false);
+    setEditingDeal(null);
+    setShowDeleteConfirm(false);
+    setIsCloneMode(false);
+  };
+
+  const handleCloneDeal = () => {
+    // Switch to clone mode - keep form data but treat as new deal
+    setIsCloneMode(true);
+    setFormData(prev => ({
+      ...prev,
+      borrowerName: `${prev.borrowerName} (Copy)`,
+      stage: 'lead', // Reset stage for cloned deal
+    }));
+    showToast('info', 'Creating a copy of this deal');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +121,7 @@ export function DealModal() {
 
     setIsSubmitting(true);
     try {
-      const deal: Omit<Deal, 'id' | 'dealNumber' | 'createdAt' | 'updatedAt'> = {
+      const dealData: Partial<Deal> = {
         borrowerName: formData.borrowerName,
         borrowerContact: formData.borrowerContact || null,
         loanAmount: parseFloat(formData.loanAmount) || 0,
@@ -82,18 +131,50 @@ export function DealModal() {
         stage: formData.stage,
         priority: formData.priority,
         assignedTo: formData.assignedTo || null,
-        documentPath: null,
+        documentPath: formData.documentPath || null,
         notes: formData.notes || null,
         expectedCloseDate: formData.expectedCloseDate || null,
-        actualCloseDate: null,
       };
 
-      await window.electronAPI.addDeal(deal);
-      showToast('success', 'Deal added successfully');
-      setDealModalOpen(false);
+      if (isEditMode && editingDeal?.id && !isCloneMode) {
+        // Update existing deal
+        await window.electronAPI.updateDeal(editingDeal.id, dealData);
+        showToast('success', 'Deal updated successfully');
+      } else {
+        // Create new deal (including cloned deals)
+        await window.electronAPI.addDeal({
+          ...dealData,
+          actualCloseDate: null,
+        } as Omit<Deal, 'id' | 'dealNumber' | 'createdAt' | 'updatedAt'>);
+        showToast('success', isCloneMode ? 'Deal cloned successfully' : 'Deal added successfully');
+      }
+      
+      handleClose();
       loadDeals();
     } catch (error) {
-      showToast('error', 'Failed to add deal');
+      showToast('error', isEditMode ? 'Failed to update deal' : 'Failed to add deal');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editingDeal?.id) return;
+    
+    // Confirm before deleting
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${editingDeal.borrowerName}"?\n\nThis will also delete all associated activities and cannot be undone.`
+    );
+    if (!confirmed) return;
+    
+    setIsSubmitting(true);
+    try {
+      await window.electronAPI.deleteDeal(editingDeal.id);
+      showToast('success', 'Deal deleted successfully');
+      handleClose();
+      loadDeals();
+    } catch (error) {
+      showToast('error', 'Failed to delete deal');
     } finally {
       setIsSubmitting(false);
     }
@@ -102,22 +183,59 @@ export function DealModal() {
   if (!isDealModalOpen) return null;
 
   return (
-    <div className={styles.overlay} onClick={() => setDealModalOpen(false)}>
+    <div className={styles.overlay} onClick={handleClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <span className={styles.title}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
-            Add New Deal
+            {isCloneMode ? 'Clone Deal' : (isEditMode ? 'Edit Deal' : 'Add New Deal')}
           </span>
-          <button className={styles.closeButton} onClick={() => setDealModalOpen(false)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div className={styles.headerActions}>
+            {isEditMode && !isCloneMode && (
+              <button 
+                className={styles.generateDocButton}
+                onClick={() => setShowMemoGenerator(true)}
+                title="Generate Document"
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="18" x2="12" y2="12" />
+                  <line x1="9" y1="15" x2="15" y2="15" />
+                </svg>
+              </button>
+            )}
+            {isEditMode && !isCloneMode && (
+              <button 
+                className={styles.cloneButton}
+                onClick={handleCloneDeal}
+                title="Clone this deal"
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </button>
+            )}
+            <button className={styles.closeButton} onClick={handleClose}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
+
+        {isEditMode && editingDeal && (
+          <div className={styles.dealInfo}>
+            <span className={styles.dealNumber}>{editingDeal.dealNumber}</span>
+            <span className={styles.dealCreated}>Created: {new Date(editingDeal.createdAt || '').toLocaleDateString()}</span>
+          </div>
+        )}
 
         <form className={styles.content} onSubmit={handleSubmit}>
           <div className={styles.form}>
@@ -255,6 +373,17 @@ export function DealModal() {
             </div>
 
             <div className={styles.formGroup}>
+              <label className={styles.label}>Document Folder Path</label>
+              <input
+                type="text"
+                className={styles.input}
+                value={formData.documentPath}
+                onChange={(e) => setFormData(prev => ({ ...prev, documentPath: e.target.value }))}
+                placeholder="e.g., C:\\Deals\\AcmeCorp"
+              />
+            </div>
+
+            <div className={styles.formGroup}>
               <label className={styles.label}>Notes</label>
               <textarea
                 className={styles.textarea}
@@ -266,23 +395,68 @@ export function DealModal() {
           </div>
 
           <div className={styles.footer}>
-            <button 
-              type="button" 
-              className={styles.cancelButton}
-              onClick={() => setDealModalOpen(false)}
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              className={styles.submitButton}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Adding...' : 'Add Deal'}
-            </button>
+            {isEditMode && !isCloneMode && (
+              <div className={styles.deleteSection}>
+                {showDeleteConfirm ? (
+                  <>
+                    <span className={styles.deleteConfirmText}>Delete this deal?</span>
+                    <button 
+                      type="button" 
+                      className={styles.deleteConfirmButton}
+                      onClick={handleDelete}
+                      disabled={isSubmitting}
+                    >
+                      Yes, Delete
+                    </button>
+                    <button 
+                      type="button" 
+                      className={styles.cancelDeleteButton}
+                      onClick={() => setShowDeleteConfirm(false)}
+                    >
+                      No
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    type="button" 
+                    className={styles.deleteButton}
+                    onClick={() => setShowDeleteConfirm(true)}
+                  >
+                    🗑️ Delete Deal
+                  </button>
+                )}
+              </div>
+            )}
+            <div className={styles.actionButtons}>
+              <button 
+                type="button" 
+                className={styles.cancelButton}
+                onClick={handleClose}
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                className={styles.submitButton}
+                disabled={isSubmitting}
+              >
+                {isSubmitting 
+                  ? (isCloneMode ? 'Cloning...' : (isEditMode ? 'Saving...' : 'Adding...')) 
+                  : (isCloneMode ? 'Clone Deal' : (isEditMode ? 'Save Changes' : 'Add Deal'))}
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {/* Memo Generator Modal */}
+      {showMemoGenerator && editingDeal && (
+        <MemoGenerator
+          isOpen={showMemoGenerator}
+          onClose={() => setShowMemoGenerator(false)}
+          deal={editingDeal}
+        />
+      )}
     </div>
   );
 }

@@ -12,7 +12,6 @@
   letter-spacing: 0.10em;
   color: var(--text-secondary);
   text-transform: uppercase;
-  opacity: 0.70;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   justify-content: space-between;
@@ -21,6 +20,7 @@
 
 .title {
   user-select: none;
+  opacity: 0.70;
 }
 
 .headerActions {
@@ -522,6 +522,9 @@
   cursor: pointer;
   transition: all 0.15s ease;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .sourceButton:hover {
@@ -529,6 +532,34 @@
   border-color: var(--accent);
   color: var(--accent);
   transform: translateY(-1px);
+}
+
+/* Sources from other deals - styled with dashed border */
+.otherDealSource {
+  opacity: 0.7;
+  border-style: dashed;
+  background: rgba(255, 200, 100, 0.05);
+}
+
+.otherDealSource:hover {
+  background: rgba(255, 200, 100, 0.15);
+  border-color: #f0ad4e;
+  color: #f0ad4e;
+}
+
+.otherDealIcon {
+  font-size: 10px;
+}
+
+/* Relevance score badge */
+.relevanceScore {
+  font-size: 9px;
+  opacity: 0.7;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+  font-weight: 400;
 }
 
 .cloudIcon {
@@ -796,3 +827,171 @@
   display: inline-block;
   margin-top: 10px;
 }
+
+/* Source Context Menu */
+.sourceContextMenu {
+  position: fixed;
+  background: var(--bg-primary, #1e1e1e);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  z-index: 99999;
+  min-width: 200px;
+  overflow: visible;
+  animation: contextMenuFadeIn 0.12s ease-out;
+  pointer-events: auto;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.contextMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.contextMenuItem:hover {
+  background: var(--bg-hover);
+}
+
+.contextMenuItem:first-child {
+  border-radius: 7px 7px 0 0;
+}
+
+.contextMenuItem:last-child {
+  border-radius: 0 0 7px 7px;
+}
+
+.contextMenuItem:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Profile Switcher */
+.profileSwitcher {
+  position: relative;
+}
+
+.profileButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text-secondary, #888);
+  font-size: 11px;
+  transition: all 0.15s ease;
+}
+
+.profileButton:hover {
+  background: var(--bg-hover, #2a2a2a);
+  color: var(--text-primary, #ccc);
+}
+
+.profileButton.active {
+  border-color: var(--accent, #007acc);
+  color: var(--accent, #007acc);
+}
+
+.profileButtonDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.profileDropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-secondary, #1e1e1e);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 6px;
+  min-width: 200px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  padding: 4px;
+  opacity: 1;
+}
+
+.profileDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.profileDropdownItem:hover {
+  background: var(--bg-hover, #2a2a2a);
+}
+
+.profileDropdownItem.selected {
+  background: rgba(0, 122, 204, 0.15);
+}
+
+.profileDropdownName {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary, #e0e0e0);
+  font-weight: 500;
+}
+
+.profileDropdownCheck {
+  width: 16px;
+  height: 16px;
+  color: #22c55e;
+}
+
+.profileDropdownDivider {
+  height: 1px;
+  background: var(--border-color, #3c3c3c);
+  margin: 4px 0;
+}
+
+.profileDropdownAction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary, #e0e0e0);
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.profileDropdownAction:hover {
+  background: var(--bg-hover, #2a2a2a);
+  color: var(--text-primary, #fff);
+}
+
+.profileDropdownAction svg {
+  width: 14px;
+  height: 14px;
+}
+

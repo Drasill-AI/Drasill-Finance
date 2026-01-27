@@ -3,6 +3,8 @@ import { ChatRequest, IPC_CHANNELS, FileContext } from '@drasill/shared';
 import { getRAGContext, getIndexingStatus } from './rag';
 import { CHAT_TOOLS, executeTool, buildDealContext, ChatToolContext } from './chatTools';
 import { proxyChatRequest, getSession } from './supabase';
+import { incrementUsage } from './usage';
+import { getActiveProfileWithInheritance } from './database';
 
 let abortController: AbortController | null = null;
 
@@ -37,13 +39,22 @@ interface RAGSource {
   fileName: string;
   filePath: string;
   section: string;
+  pageNumber?: number;
+  source?: 'local' | 'onedrive';
+  oneDriveId?: string;
+  relevanceScore?: number;
+  fromOtherDeal?: boolean;
+  dealId?: string;
 }
 
 /**
  * Build the system prompt with optional file context and RAG context
  * Returns both the prompt and any RAG sources for citation
+ * @param context - Current file context if any
+ * @param userQuery - The user's query for RAG search
+ * @param currentDealId - Optional deal ID for deal-scoped search
  */
-async function buildSystemPrompt(context?: FileContext, userQuery?: string): Promise<{ prompt: string; ragSources: RAGSource[] }> {
+async function buildSystemPrompt(context?: FileContext, userQuery?: string, currentDealId?: string): Promise<{ prompt: string; ragSources: RAGSource[] }> {
   let systemPrompt = `You are an AI assistant for Drasill - a lending deal flow management and underwriting system.
 
 Your capabilities:
@@ -58,8 +69,27 @@ When users want to add activities or update deal stages, use the available tools
 
 Be concise, accurate, and helpful. When referencing information from provided context, cite specific sources or file names using [[1]], [[2]] format. Summarize actions you take.`;
 
+  // Add active knowledge profile context (soft guardrails)
+  const { profile: activeProfile, fullGuidelines } = getActiveProfileWithInheritance();
+  if (activeProfile && fullGuidelines) {
+    systemPrompt += `\n\n--- KNOWLEDGE PROFILE: ${activeProfile.name.toUpperCase()} ---
+The following contextual guidelines apply to this conversation. These are suggestions to help ensure consistency and accuracy, not strict rules:
+
+${fullGuidelines}`;
+    
+    if (activeProfile.terminology) {
+      systemPrompt += `\n\nKey Terminology:\n${activeProfile.terminology}`;
+    }
+    
+    if (activeProfile.complianceChecks) {
+      systemPrompt += `\n\nCompliance Considerations (soft reminders, not blocking requirements):\n${activeProfile.complianceChecks}`;
+    }
+    
+    systemPrompt += `\n--- END KNOWLEDGE PROFILE ---`;
+  }
+
   // Add deal pipeline context
-  const dealContext = buildDealContext();
+  const dealContext = buildDealContext(currentDealId);
   systemPrompt += `\n\n--- DEAL PIPELINE ---\n${dealContext}\n--- END DEAL PIPELINE ---`;
 
   // Add RAG context if available
@@ -68,16 +98,24 @@ Be concise, accurate, and helpful. When referencing information from provided co
   
   if (ragStatus.chunksCount > 0 && userQuery) {
     try {
-      const ragResult = await getRAGContext(userQuery);
+      // Pass dealId for deal-scoped search
+      const ragResult = await getRAGContext(userQuery, currentDealId);
       if (ragResult.context) {
         ragSources = ragResult.sources;
+        
+        // Add note about sources from other deals if present
+        const hasOtherDealSources = ragSources.some(s => s.fromOtherDeal);
+        const otherDealNote = hasOtherDealSources 
+          ? '\n\nNote: Some sources marked [FROM OTHER DEAL] are from deals other than the current focus.'
+          : '';
+        
         systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---
 The following numbered sources were retrieved from the user's indexed documentation:
 
 ${ragResult.context}
 --- END KNOWLEDGE BASE CONTEXT ---
 
-IMPORTANT: When referencing information from the knowledge base, cite using the format [[1]], [[2]], etc. corresponding to the source numbers above. Always cite your sources when providing information from the documentation.`;
+IMPORTANT: When referencing information from the knowledge base, cite using the format [[1]], [[2]], etc. corresponding to the source numbers above. Always cite your sources when providing information from the documentation.${otherDealNote}`;
       }
     } catch (error) {
       console.error('Failed to get RAG context:', error);
@@ -136,8 +174,8 @@ export async function sendChatMessage(
   const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
   try {
-    // Build system prompt with RAG context
-    const { prompt: systemPrompt, ragSources } = await buildSystemPrompt(request.context, request.message);
+    // Build system prompt with RAG context (pass dealId for deal-scoped search)
+    const { prompt: systemPrompt, ragSources } = await buildSystemPrompt(request.context, request.message, request.dealId);
     
     // Send RAG sources to frontend if available (for citation linking)
     if (ragSources.length > 0) {
@@ -159,6 +197,9 @@ export async function sendChatMessage(
           pageNumber: s.pageNumber,
           source: s.source,
           oneDriveId: s.oneDriveId,
+          relevanceScore: s.relevanceScore,
+          fromOtherDeal: s.fromOtherDeal,
+          dealId: s.dealId,
         })));
       }
     }
@@ -264,6 +305,9 @@ export async function sendChatMessage(
         }
       }
     }
+
+    // Track AI message usage
+    incrementUsage('ai_messages');
 
     // Signal stream complete
     window.webContents.send(IPC_CHANNELS.CHAT_STREAM_END, {

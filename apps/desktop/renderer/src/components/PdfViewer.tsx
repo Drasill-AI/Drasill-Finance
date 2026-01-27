@@ -20,6 +20,7 @@ export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: P
   const [pdfData, setPdfData] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(initialPage || 1);
+  const [pageInputValue, setPageInputValue] = useState<string>('1');
   const [scale, setScale] = useState<number>(1.0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +75,11 @@ export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: P
     }
   }, [initialPage, numPages]);
 
+  // Sync page input value with current page
+  useEffect(() => {
+    setPageInputValue(String(currentPage));
+  }, [currentPage]);
+
   const onDocumentLoadSuccess = useCallback(({ numPages: pages }: { numPages: number }) => {
     setNumPages(pages);
     // Navigate to initial page if specified
@@ -91,6 +97,31 @@ export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: P
 
   const goToPrevPage = () => setCurrentPage((prev) => Math.max(1, prev - 1));
   const goToNextPage = () => setCurrentPage((prev) => Math.min(numPages, prev + 1));
+  
+  const goToPage = (page: number) => {
+    const validPage = Math.max(1, Math.min(numPages, page));
+    setCurrentPage(validPage);
+  };
+
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInputValue(e.target.value);
+  };
+
+  const handlePageInputBlur = () => {
+    const page = parseInt(pageInputValue, 10);
+    if (!isNaN(page)) {
+      goToPage(page);
+    } else {
+      setPageInputValue(String(currentPage));
+    }
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
   const zoomIn = () => setScale((prev) => Math.min(3, prev + 0.25));
   const zoomOut = () => setScale((prev) => Math.max(0.5, prev - 0.25));
   const resetZoom = () => setScale(1.0);
@@ -136,9 +167,17 @@ export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: P
           >
             ◀
           </button>
-          <span className={styles.pageInfo}>
-            {currentPage} / {numPages}
-          </span>
+          <input
+            type="text"
+            className={styles.pageInput}
+            value={pageInputValue}
+            onChange={handlePageInputChange}
+            onBlur={handlePageInputBlur}
+            onKeyDown={handlePageInputKeyDown}
+            title="Enter page number"
+          />
+          <span className={styles.pageSeparator}>/</span>
+          <span className={styles.totalPages}>{numPages}</span>
           <button 
             className={styles.toolButton} 
             onClick={goToNextPage} 

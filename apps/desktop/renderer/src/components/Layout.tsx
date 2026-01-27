@@ -13,6 +13,7 @@ import styles from './Layout.module.css';
 export function Layout() {
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
+  const [splitRatio, setSplitRatio] = useState(0.5); // 50% split
   const layoutRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -26,6 +27,8 @@ export function Layout() {
     closeActiveTab,
     setActiveTab,
     toggleCommandPalette,
+    splitViewEnabled,
+    toggleSplitView,
   } = useAppStore();
 
   // Global keyboard shortcuts
@@ -84,6 +87,13 @@ export function Layout() {
         return;
       }
 
+      // Ctrl/Cmd + \ - Toggle split view
+      if (modKey && e.key === '\\') {
+        e.preventDefault();
+        toggleSplitView();
+        return;
+      }
+
       // Ctrl/Cmd + 1-9 - Switch to tab by number
       if (modKey && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
@@ -97,7 +107,7 @@ export function Layout() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTabId, tabs, closeActiveTab, setActiveTab, toggleBottomPanel, toggleCommandPalette]);
+  }, [activeTabId, tabs, closeActiveTab, setActiveTab, toggleBottomPanel, toggleCommandPalette, toggleSplitView]);
 
   // Detect deal when active tab changes
   useEffect(() => {
@@ -157,6 +167,35 @@ export function Layout() {
     document.body.style.userSelect = 'none';
   }, [rightPanelWidth]);
 
+  // Split view resize handler
+  const handleSplitDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = e.currentTarget.parentElement;
+    if (!container) return;
+    
+    const containerWidth = container.clientWidth;
+    const startX = e.clientX;
+    const startRatio = splitRatio;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - startX;
+      const newRatio = startRatio + (delta / containerWidth);
+      setSplitRatio(Math.max(0.2, Math.min(0.8, newRatio)));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [splitRatio]);
+
   return (
     <div className={styles.layout} ref={layoutRef}>
       {/* Left Sidebar - File Explorer */}
@@ -177,10 +216,38 @@ export function Layout() {
         
         {/* Editor Section */}
         <main className={styles.main}>
-          <TabBar />
-          <div className={styles.editorContainer}>
-            <EditorPane />
-          </div>
+          {splitViewEnabled ? (
+            <div className={styles.splitContainer}>
+              {/* Primary Pane */}
+              <div className={styles.splitPane} style={{ width: `${splitRatio * 100}%` }}>
+                <TabBar paneId="primary" />
+                <div className={styles.editorContainer}>
+                  <EditorPane paneId="primary" />
+                </div>
+              </div>
+              
+              {/* Split Resize Handle */}
+              <div 
+                className={styles.splitResizeHandle}
+                onMouseDown={handleSplitDragStart}
+              />
+              
+              {/* Secondary Pane */}
+              <div className={styles.splitPane} style={{ width: `${(1 - splitRatio) * 100}%` }}>
+                <TabBar paneId="secondary" />
+                <div className={styles.editorContainer}>
+                  <EditorPane paneId="secondary" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <TabBar paneId="primary" />
+              <div className={styles.editorContainer}>
+                <EditorPane paneId="primary" />
+              </div>
+            </>
+          )}
         </main>
 
         {/* Bottom Panel - Logs & Analytics */}

@@ -4,6 +4,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { Toast } from './components/Toast';
 import { AuthScreen } from './components/AuthScreen';
 import { SubscriptionGate } from './components/SubscriptionGate';
+import { OnboardingModal } from './components/OnboardingModal';
 import { useAppStore } from './store';
 import { setupPdfExtractionListener } from './utils/pdfExtractor';
 
@@ -130,7 +131,12 @@ function AppContent({ user, subscription, onSignOut }: AppContentProps) {
     openWorkspace, 
     closeActiveTab, 
     toggleCommandPalette,
-    isCommandPaletteOpen 
+    isCommandPaletteOpen,
+    deals,
+    hasCompletedOnboarding,
+    isOnboardingOpen,
+    setOnboardingOpen,
+    completeOnboarding
   } = useAppStore();
 
   // Setup PDF extraction listener for RAG indexing
@@ -140,6 +146,17 @@ function AppContent({ user, subscription, onSignOut }: AppContentProps) {
       unsubscribePdfExtractor();
     };
   }, []);
+
+  // Show onboarding for new users (no deals and hasn't completed onboarding)
+  useEffect(() => {
+    if (deals.length === 0 && !hasCompletedOnboarding && !isOnboardingOpen) {
+      // Small delay to let the app settle before showing onboarding
+      const timer = setTimeout(() => {
+        setOnboardingOpen(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [deals.length, hasCompletedOnboarding, isOnboardingOpen, setOnboardingOpen]);
 
   useEffect(() => {
     // Listen for menu events from main process
@@ -196,6 +213,12 @@ function AppContent({ user, subscription, onSignOut }: AppContentProps) {
       <Layout />
       <CommandPalette />
       <Toast />
+      {isOnboardingOpen && (
+        <OnboardingModal 
+          onClose={() => setOnboardingOpen(false)}
+          onComplete={completeOnboarding}
+        />
+      )}
     </div>
   );
 }

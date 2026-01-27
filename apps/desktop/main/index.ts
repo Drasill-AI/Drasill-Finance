@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, shell, nativeImage } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc';
 import { createMenu } from './menu';
-import { initDatabase } from './database';
+import { initDatabase, closeDatabase, backupDatabase } from './database';
 import { initRAG } from './rag';
 
 let mainWindow: BrowserWindow | null = null;
@@ -98,10 +98,33 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Graceful shutdown - backup and close database
+app.on('before-quit', () => {
+  try {
+    // Create backup before quitting
+    backupDatabase();
+  } catch (err) {
+    console.error('Failed to backup database on quit:', err);
+  }
+});
+
+app.on('will-quit', () => {
+  try {
+    closeDatabase();
+  } catch (err) {
+    console.error('Failed to close database:', err);
+  }
+});
+
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  dialog.showErrorBox('Error', error.message);
+  // Attempt to save database before showing error
+  try {
+    closeDatabase();
+  } catch {}
+  dialog.showErrorBox('Error', `An unexpected error occurred: ${error.message}\n\nThe application will now close.`);
+  app.quit();
 });
 
 process.on('unhandledRejection', (reason) => {

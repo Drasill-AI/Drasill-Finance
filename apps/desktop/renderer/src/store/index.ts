@@ -7,6 +7,9 @@ interface ToastMessage {
   message: string;
 }
 
+// Split view types
+type SplitPaneId = 'primary' | 'secondary';
+
 interface AppState {
   // Workspace
   workspacePath: string | null;
@@ -28,9 +31,15 @@ interface AppState {
   indexingProgress: { current: number; total: number; fileName: string; percentage: number } | null;
   ragChunksCount: number;
 
-  // Tabs
+  // Tabs (primary pane)
   tabs: Tab[];
   activeTabId: string | null;
+  
+  // Split View
+  splitViewEnabled: boolean;
+  secondaryTabs: Tab[];
+  secondaryActiveTabId: string | null;
+  activePaneId: SplitPaneId;
   
   // File content cache
   fileContents: Map<string, string>;
@@ -51,6 +60,7 @@ interface AppState {
   isDealModalOpen: boolean;
   activitiesRefreshTrigger: number;
   editingActivity: DealActivity | null;
+  editingDeal: Deal | null;
 
   // Bottom Panel
   bottomPanelState: BottomPanelState;
@@ -60,6 +70,19 @@ interface AppState {
   workspaceSource: 'local' | 'onedrive';
   oneDriveFolderId: string | null;
   isOneDrivePickerOpen: boolean;
+
+  // Onboarding
+  hasCompletedOnboarding: boolean;
+  isOnboardingOpen: boolean;
+
+  // Recent Files
+  recentFiles: Array<{
+    path: string;
+    name: string;
+    source: 'local' | 'onedrive';
+    oneDriveId?: string;
+    timestamp: number;
+  }>;
 
   // Actions
   openWorkspace: () => Promise<void>;
@@ -80,6 +103,14 @@ interface AppState {
   setActiveTab: (tabId: string) => void;
   saveTabViewState: (tabId: string, viewState: unknown) => void;
   getTabViewState: (tabId: string) => unknown | undefined;
+  
+  // Split view actions
+  openFileInSplitView: (path: string, name: string, source?: 'local' | 'onedrive', oneDriveId?: string, initialPage?: number) => Promise<void>;
+  toggleSplitView: () => void;
+  closeSplitView: () => void;
+  setActivePaneId: (paneId: SplitPaneId) => void;
+  closeSecondaryTab: (tabId: string) => void;
+  setSecondaryActiveTab: (tabId: string) => void;
 
   toggleCommandPalette: () => void;
   
@@ -117,7 +148,10 @@ interface AppState {
   setActivityModalOpen: (open: boolean) => void;
   setDealModalOpen: (open: boolean) => void;
   setEditingActivity: (activity: DealActivity | null) => void;
+  setEditingDeal: (deal: Deal | null) => void;
   refreshActivities: () => void;
+  exportDealToPdf: (dealId: string) => Promise<void>;
+  exportPipelineToPdf: () => Promise<void>;
 
   // Bottom panel actions
   setBottomPanelOpen: (open: boolean) => void;
@@ -136,6 +170,14 @@ interface AppState {
   toggleOneDriveDirectory: (node: TreeNode) => Promise<void>;
   openOneDriveFile: (node: TreeNode, initialPage?: number) => Promise<void>;
   setOneDrivePickerOpen: (open: boolean) => void;
+  
+  // Onboarding actions
+  setOnboardingOpen: (open: boolean) => void;
+  completeOnboarding: () => void;
+  
+  // Recent files actions
+  addToRecentFiles: (path: string, name: string, source: 'local' | 'onedrive', oneDriveId?: string) => void;
+  clearRecentFiles: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -150,6 +192,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   isCommandPaletteOpen: false,
   toasts: [],
   tabViewStates: new Map(),
+  
+  // Split view state
+  splitViewEnabled: false,
+  secondaryTabs: [],
+  secondaryActiveTabId: null,
+  activePaneId: 'primary',
   
   // Chat state
   chatMessages: [],
@@ -174,6 +222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isDealModalOpen: false,
   activitiesRefreshTrigger: 0,
   editingActivity: null,
+  editingDeal: null,
 
   // Bottom panel state
   bottomPanelState: {
@@ -187,6 +236,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   workspaceSource: 'local',
   oneDriveFolderId: null,
   isOneDrivePickerOpen: false,
+
+  // Onboarding state
+  hasCompletedOnboarding: false,
+  isOnboardingOpen: false,
+
+  // Recent files state
+  recentFiles: [],
 
   // Actions
   openWorkspace: async () => {
@@ -410,12 +466,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openFile: async (path: string, name: string) => {
-    const { tabs, loadingFiles } = get();
+    const { tabs, loadingFiles, addToRecentFiles } = get();
 
     // Check if already open
     const existingTab = tabs.find((t) => t.path === path);
     if (existingTab) {
       set({ activeTabId: existingTab.id });
+      // Still track as recent file
+      addToRecentFiles(path, name, 'local');
       return;
     }
 
@@ -433,6 +491,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
       }));
+      // Track recent file
+      addToRecentFiles(path, name, 'local');
       // Persist state
       get().savePersistedState();
       return;
@@ -450,6 +510,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
       }));
+      // Track recent file
+      addToRecentFiles(path, name, 'local');
       // Persist state
       get().savePersistedState();
       return;
@@ -485,6 +547,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         fileContents: newContents,
         loadingFiles: newLoading,
       }));
+      // Track recent file
+      addToRecentFiles(path, name, 'local');
       // Persist state
       get().savePersistedState();
     } catch (error) {
@@ -542,6 +606,134 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeTabId: tabId });
     // Persist active tab change
     get().savePersistedState();
+  },
+
+  // Split view actions
+  openFileInSplitView: async (path: string, name: string, source?: 'local' | 'onedrive', oneDriveId?: string, initialPage?: number) => {
+    const { secondaryTabs, fileContents } = get();
+    
+    // Enable split view if not already
+    set({ splitViewEnabled: true, activePaneId: 'secondary' });
+
+    // Check if already open in secondary pane
+    const existingTab = secondaryTabs.find((t) => t.path === path);
+    if (existingTab) {
+      // If it's a PDF with a new initial page, update it
+      if (initialPage !== undefined && existingTab.type === 'pdf') {
+        set((state) => ({
+          secondaryTabs: state.secondaryTabs.map(t => 
+            t.id === existingTab.id ? { ...t, initialPage } : t
+          ),
+          secondaryActiveTabId: existingTab.id,
+        }));
+      } else {
+        set({ secondaryActiveTabId: existingTab.id });
+      }
+      return;
+    }
+
+    const fileType = getFileType(path);
+
+    // Create new tab for secondary pane
+    const newTab: Tab = {
+      id: `secondary-${path}`,
+      name,
+      path,
+      type: fileType,
+      source: source,
+      oneDriveId: oneDriveId,
+      initialPage: initialPage,
+    };
+
+    // For PDF/Word, just create tab (viewers handle loading)
+    if (fileType === 'pdf' || fileType === 'word') {
+      set((state) => ({
+        secondaryTabs: [...state.secondaryTabs, newTab],
+        secondaryActiveTabId: newTab.id,
+      }));
+      return;
+    }
+
+    // For text files, load content if not already cached
+    if (!fileContents.has(path)) {
+      try {
+        let content: string;
+        if (source === 'onedrive' && oneDriveId) {
+          const result = await window.electronAPI.readOneDriveFile(oneDriveId);
+          content = result.content;
+        } else {
+          const result = await window.electronAPI.readFile(path);
+          content = result.content;
+        }
+        
+        const newContents = new Map(get().fileContents);
+        newContents.set(path, content);
+        set({ fileContents: newContents });
+      } catch (error) {
+        get().showToast('error', `Failed to open file in split view: ${error}`);
+        return;
+      }
+    }
+
+    set((state) => ({
+      secondaryTabs: [...state.secondaryTabs, newTab],
+      secondaryActiveTabId: newTab.id,
+    }));
+  },
+
+  toggleSplitView: () => {
+    set((state) => ({ splitViewEnabled: !state.splitViewEnabled }));
+  },
+
+  closeSplitView: () => {
+    set({
+      splitViewEnabled: false,
+      secondaryTabs: [],
+      secondaryActiveTabId: null,
+      activePaneId: 'primary',
+    });
+  },
+
+  setActivePaneId: (paneId) => {
+    set({ activePaneId: paneId });
+  },
+
+  closeSecondaryTab: (tabId: string) => {
+    set((state) => {
+      const tabIndex = state.secondaryTabs.findIndex((t) => t.id === tabId);
+      const newTabs = state.secondaryTabs.filter((t) => t.id !== tabId);
+
+      // Determine new active tab
+      let newActiveTabId = state.secondaryActiveTabId;
+      if (state.secondaryActiveTabId === tabId) {
+        if (newTabs.length === 0) {
+          newActiveTabId = null;
+        } else if (tabIndex >= newTabs.length) {
+          newActiveTabId = newTabs[newTabs.length - 1].id;
+        } else {
+          newActiveTabId = newTabs[tabIndex].id;
+        }
+      }
+
+      // If no tabs left, close split view
+      if (newTabs.length === 0) {
+        return {
+          splitViewEnabled: false,
+          secondaryTabs: [],
+          secondaryActiveTabId: null,
+          activePaneId: 'primary',
+        };
+      }
+
+      return {
+        secondaryTabs: newTabs,
+        secondaryActiveTabId: newActiveTabId,
+      };
+    });
+  },
+
+  setSecondaryActiveTab: (tabId: string) => {
+    set({ secondaryActiveTabId: tabId, activePaneId: 'secondary' });
   },
 
   saveTabViewState: (tabId: string, viewState: unknown) => {
@@ -714,10 +906,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Send the message
     try {
       const history = get().chatMessages.filter(m => m.id !== assistantMessage.id);
+      const { detectedDeal } = get();
       await window.electronAPI.sendChatMessage({
         message: content,
         context: fileContext,
         history,
+        dealId: detectedDeal?.id,
       });
     } catch (error) {
       set({ isChatLoading: false, chatError: 'Failed to send message' });
@@ -941,6 +1135,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadPersistedState: async () => {
     try {
       const state = await window.electronAPI.loadState();
+      
+      // Load onboarding state
+      if (state?.hasCompletedOnboarding !== undefined) {
+        set({ hasCompletedOnboarding: state.hasCompletedOnboarding });
+      }
+      
+      // Load recent files
+      if (state?.recentFiles && Array.isArray(state.recentFiles)) {
+        set({ recentFiles: state.recentFiles });
+      }
+      
       if (state?.workspacePath) {
         // Check if this was an OneDrive workspace
         if (state.workspaceSource === 'onedrive' && state.oneDriveFolderId) {
@@ -1075,10 +1280,44 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setDealModalOpen: (open: boolean) => {
     set({ isDealModalOpen: open });
+    // Clear editing deal when closing modal
+    if (!open) {
+      set({ editingDeal: null });
+    }
+  },
+
+  setEditingDeal: (deal: Deal | null) => {
+    set({ editingDeal: deal });
   },
 
   refreshActivities: () => {
     set((state) => ({ activitiesRefreshTrigger: state.activitiesRefreshTrigger + 1 }));
+  },
+
+  exportDealToPdf: async (dealId: string) => {
+    try {
+      const result = await window.electronAPI.exportDealToPdf(dealId);
+      if (result.success && result.filePath) {
+        get().showToast('success', `Exported to ${result.filePath}`);
+      } else if (result.error && result.error !== 'Export cancelled') {
+        get().showToast('error', `Export failed: ${result.error}`);
+      }
+    } catch (error) {
+      get().showToast('error', 'Failed to export deal to PDF');
+    }
+  },
+
+  exportPipelineToPdf: async () => {
+    try {
+      const result = await window.electronAPI.exportPipelineToPdf();
+      if (result.success && result.filePath) {
+        get().showToast('success', `Pipeline exported to ${result.filePath}`);
+      } else if (result.error && result.error !== 'Export cancelled') {
+        get().showToast('error', `Export failed: ${result.error}`);
+      }
+    } catch (error) {
+      get().showToast('error', 'Failed to export pipeline to PDF');
+    }
   },
 
   // Bottom panel actions
@@ -1298,6 +1537,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    const { addToRecentFiles } = get();
+
     try {
       // Check if tab already exists
       const existingTab = get().tabs.find((t) => t.id === node.id);
@@ -1312,6 +1553,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         } else {
           set({ activeTabId: existingTab.id });
         }
+        // Track as recent file
+        addToRecentFiles(node.path, node.name, 'onedrive', node.oneDriveId);
         return;
       }
 
@@ -1350,15 +1593,67 @@ export const useAppStore = create<AppState>((set, get) => ({
         fileContents,
       }));
 
+      // Track as recent file
+      addToRecentFiles(node.path, node.name, 'onedrive', node.oneDriveId);
       get().savePersistedState();
     } catch (error) {
       console.error('[Store] Failed to open OneDrive file:', error);
-      get().showToast('error', 'Failed to open file from OneDrive');
+      // Don't show toast error for file open failures - user can see the file didn't open
+      // This prevents noisy errors when OneDrive files are unavailable or local files are misrouted
     }
   },
 
   setOneDrivePickerOpen: (open: boolean) => {
     set({ isOneDrivePickerOpen: open });
+  },
+
+  // Onboarding
+  setOnboardingOpen: (open: boolean) => {
+    set({ isOnboardingOpen: open });
+  },
+
+  completeOnboarding: () => {
+    set({ hasCompletedOnboarding: true, isOnboardingOpen: false });
+    // Persist this state
+    const currentPersisted = get().persistedState || {};
+    const newPersisted = { ...currentPersisted, hasCompletedOnboarding: true };
+    set({ persistedState: newPersisted });
+    window.electronAPI?.savePersistedState(newPersisted);
+  },
+
+  // Recent Files
+  addToRecentFiles: (path: string, name: string, source: 'local' | 'onedrive', oneDriveId?: string) => {
+    const MAX_RECENT_FILES = 15;
+    const { recentFiles } = get();
+    
+    // Remove existing entry for this file if exists
+    const filtered = recentFiles.filter(f => f.path !== path);
+    
+    // Add to front of list
+    const newEntry = {
+      path,
+      name,
+      source,
+      oneDriveId,
+      timestamp: Date.now(),
+    };
+    
+    const updated = [newEntry, ...filtered].slice(0, MAX_RECENT_FILES);
+    set({ recentFiles: updated });
+    
+    // Persist to state
+    const currentPersisted = get().persistedState || {};
+    const newPersisted = { ...currentPersisted, recentFiles: updated };
+    set({ persistedState: newPersisted });
+    window.electronAPI?.savePersistedState(newPersisted);
+  },
+
+  clearRecentFiles: () => {
+    set({ recentFiles: [] });
+    const currentPersisted = get().persistedState || {};
+    const newPersisted = { ...currentPersisted, recentFiles: [] };
+    set({ persistedState: newPersisted });
+    window.electronAPI?.savePersistedState(newPersisted);
   },
 }));
 

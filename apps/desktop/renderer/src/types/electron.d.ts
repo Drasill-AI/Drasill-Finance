@@ -69,6 +69,37 @@ interface ElectronAPI {
   importDealsFromCSV: () => Promise<{ imported: number; errors: string[] }>;
   exportDealsToCSV: () => Promise<{ exported: number; filePath: string | null }>;
   detectDealFromPath: (filePath: string) => Promise<Deal | null>;
+  // Export API
+  exportDealToPdf: (dealId: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  exportPipelineToPdf: () => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  // Usage Tracking API
+  getUsageStats: () => Promise<{
+    aiMessagesThisMonth: number;
+    aiMessagesToday: number;
+    dealsCreatedThisMonth: number;
+    documentsIndexedThisMonth: number;
+    lastResetDate: string;
+  }>;
+  getUsageLimits: () => Promise<{
+    aiMessagesPerMonth: number;
+    dealsPerMonth: number;
+    documentsPerMonth: number;
+  }>;
+  checkUsageLimits: () => Promise<{
+    withinLimits: boolean;
+    warnings: string[];
+    aiMessagesRemaining: number;
+    dealsRemaining: number;
+    documentsRemaining: number;
+  }>;
+  getUsagePercentages: () => Promise<{
+    aiMessages: number;
+    deals: number;
+    documents: number;
+  }>;
+  trackAiMessage: () => Promise<void>;
+  trackDealCreated: () => Promise<void>;
+  trackDocumentIndexed: () => Promise<void>;
   // Deal Activities API
   addDealActivity: (activity: Omit<DealActivity, 'id' | 'createdAt'>) => Promise<DealActivity>;
   getActivitiesForDeal: (dealId: string, limit?: number) => Promise<DealActivity[]>;
@@ -114,6 +145,12 @@ interface ElectronAPI {
   getChatSession: (id: string) => Promise<ChatSessionFull | null>;
   getAllChatSessions: () => Promise<ChatSession[]>;
   addChatMessage: (sessionId: string, message: ChatMessage) => Promise<ChatMessage>;
+  // Authentication API
+  authSignIn: (email: string, password: string) => Promise<{ success: boolean; user?: any; error?: string }>;
+  authSignOut: () => Promise<{ success: boolean; error?: string }>;
+  authResetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  authGetCurrentUser: () => Promise<{ user: any; session: any } | null>;
+  authCheckSubscription: () => Promise<{ hasActiveSubscription: boolean; subscription: any; error?: string }>;
 }
 
 declare global {

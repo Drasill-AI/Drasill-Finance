@@ -170,6 +170,25 @@ export async function signOut(): Promise<{ success: boolean; error?: string }> {
 }
 
 /**
+ * Send password reset email
+ */
+export async function resetPassword(email: string): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabase();
+  
+  const { error } = await client.auth.resetPasswordForEmail(email, {
+    redirectTo: 'https://drasillai.com/auth/reset-callback',
+  });
+  
+  if (error) {
+    console.error('[Supabase] Password reset error:', error);
+    return { success: false, error: error.message };
+  }
+  
+  console.log('[Supabase] Password reset email sent to:', email);
+  return { success: true };
+}
+
+/**
  * Get current user
  */
 export async function getCurrentUser(): Promise<{ user: any; session: Session } | null> {

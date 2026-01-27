@@ -1,9 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import ReactDOM from 'react-dom';
 import { useAppStore } from '../store';
-import { FileContext, RAGSource, TreeNode } from '@drasill/shared';
+import { FileContext, RAGSource, KnowledgeProfile } from '@drasill/shared';
 import styles from './RightPanel.module.css';
 import lonnieLogo from '../assets/lonnie.png';
 import { ChatHistory } from './ChatHistory';
+import { UsageStats } from './UsageStats';
+import { KnowledgeBaseModal } from './KnowledgeBaseModal';
+import { TemplateManager } from './TemplateManager';
 
 /**
  * Parse simple markdown-like formatting into React elements
@@ -188,6 +192,14 @@ export function RightPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
+  // Knowledge Base state
+  const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState(false);
+  const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [profiles, setProfiles] = useState<KnowledgeProfile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<KnowledgeProfile | null>(null);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+  
   const {
     chatMessages,
     isChatLoading,
@@ -208,14 +220,75 @@ export function RightPanel() {
     openOneDriveFile,
     isHistoryOpen,
     toggleHistory,
-    currentSessionId,
+    currentSessionId: _currentSessionId,
     loadChatSessions,
+    openFileInSplitView,
   } = useAppStore();
+
+  // Source context menu state
+  const [sourceContextMenu, setSourceContextMenu] = useState<{
+    x: number;
+    y: number;
+    source: RAGSource;
+  } | null>(null);
+  const sourceMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sourceMenuRef.current && !sourceMenuRef.current.contains(e.target as Node)) {
+        setSourceContextMenu(null);
+      }
+    };
+    if (sourceContextMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [sourceContextMenu]);
 
   // Load chat sessions on mount
   useEffect(() => {
     loadChatSessions();
   }, [loadChatSessions]);
+
+  // Load knowledge profiles
+  useEffect(() => {
+    loadProfiles();
+  }, []);
+
+  // Close profile dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    if (showProfileDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showProfileDropdown]);
+
+  const loadProfiles = async () => {
+    try {
+      const allProfiles = await window.electronAPI.knowledgeProfileGetAll();
+      setProfiles(allProfiles);
+      const active = allProfiles.find((p: KnowledgeProfile) => p.isActive);
+      setActiveProfile(active || null);
+    } catch (error) {
+      console.error('Failed to load profiles:', error);
+    }
+  };
+
+  const handleSetActiveProfile = async (profileId: string | null) => {
+    try {
+      await window.electronAPI.knowledgeProfileSetActive(profileId);
+      await loadProfiles();
+      setShowProfileDropdown(false);
+    } catch (error) {
+      console.error('Failed to set active profile:', error);
+    }
+  };
 
   // Get current file context - supports multiple files
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -329,6 +402,31 @@ export function RightPanel() {
     }
   }, [openFile, openOneDriveFile]);
 
+  // Handle opening source in split view
+  const handleOpenInSplitView = useCallback((source: RAGSource) => {
+    console.log('[RightPanel] Opening in split view:', source);
+    openFileInSplitView(
+      source.filePath,
+      source.fileName,
+      source.source,
+      source.oneDriveId,
+      source.pageNumber
+    );
+    setSourceContextMenu(null);
+  }, [openFileInSplitView]);
+
+  // Handle source right-click for context menu
+  const handleSourceContextMenu = useCallback((e: React.MouseEvent, source: RAGSource) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[RightPanel] Context menu triggered at:', e.clientX, e.clientY, 'for source:', source.fileName);
+    setSourceContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      source,
+    });
+  }, []);
+
   // Render message content with markdown and clickable citations
   const renderMessageContent = useCallback((content: string, ragSources?: RAGSource[]) => {
     // First, handle citations if present
@@ -436,7 +534,10 @@ export function RightPanel() {
           </button>
         </div>
         <div className={styles.settingsContent}>
-          <div className={styles.settingsForm}>
+          {/* Usage Stats Section */}
+          <UsageStats />
+          
+          <div className={styles.settingsForm} style={{ marginTop: '16px' }}>
             <label className={styles.label}>Knowledge Base</label>
             {ragChunksCount > 0 ? (
               <>
@@ -485,6 +586,59 @@ export function RightPanel() {
       <div className={styles.header}>
         <span className={styles.title}>DEAL ASSISTANT</span>
         <div className={styles.headerActions}>
+          {/* Profile Switcher */}
+          <div className={styles.profileSwitcher} ref={profileDropdownRef}>
+            <button 
+              className={`${styles.profileButton} ${activeProfile ? styles.active : ''}`}
+              onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+              title={activeProfile ? `Profile: ${activeProfile.name}` : 'No profile active'}
+            >
+              {activeProfile && <span className={styles.profileButtonDot} />}
+              <span>{activeProfile?.name || 'Profile'}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {showProfileDropdown && (
+              <div className={styles.profileDropdown}>
+                {profiles.map(profile => (
+                  <div
+                    key={profile.id}
+                    className={`${styles.profileDropdownItem} ${profile.isActive ? styles.selected : ''}`}
+                    onClick={() => handleSetActiveProfile(profile.isActive ? null : profile.id)}
+                  >
+                    <span className={styles.profileDropdownName}>{profile.name}</span>
+                    {profile.isActive && (
+                      <svg className={styles.profileDropdownCheck} viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                      </svg>
+                    )}
+                  </div>
+                ))}
+                <div className={styles.profileDropdownDivider} />
+                <div 
+                  className={styles.profileDropdownAction}
+                  onClick={() => { setIsKnowledgeBaseOpen(true); setShowProfileDropdown(false); }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  </svg>
+                  Manage Knowledge Base
+                </div>
+                <div 
+                  className={styles.profileDropdownAction}
+                  onClick={() => { setIsTemplateManagerOpen(true); setShowProfileDropdown(false); }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  Document Templates
+                </div>
+              </div>
+            )}
+          </div>
           <button 
             className={`${styles.historyButton} ${isHistoryOpen ? styles.active : ''}`}
             onClick={toggleHistory}
@@ -518,6 +672,18 @@ export function RightPanel() {
           </button>
         </div>
       </div>
+
+      {/* Knowledge Base Modal */}
+      <KnowledgeBaseModal 
+        isOpen={isKnowledgeBaseOpen} 
+        onClose={() => { setIsKnowledgeBaseOpen(false); loadProfiles(); }} 
+      />
+      
+      {/* Template Manager Modal */}
+      <TemplateManager 
+        isOpen={isTemplateManagerOpen} 
+        onClose={() => setIsTemplateManagerOpen(false)} 
+      />
 
       {/* Chat History Panel */}
       {isHistoryOpen && (
@@ -656,12 +822,19 @@ export function RightPanel() {
                     {msg.ragSources.map((source, idx) => (
                       <button
                         key={idx}
-                        className={styles.sourceButton}
+                        className={`${styles.sourceButton} ${source.fromOtherDeal ? styles.otherDealSource : ''}`}
                         onClick={() => handleCitationClick(source)}
-                        title={`${source.section}${source.source === 'onedrive' ? ' (OneDrive)' : ''}`}
+                        onContextMenu={(e) => handleSourceContextMenu(e, source)}
+                        title={`${source.section}${source.source === 'onedrive' ? ' (OneDrive)' : ''}${source.fromOtherDeal ? ' (From other deal)' : ''}${source.relevanceScore ? ` - ${Math.round(source.relevanceScore * 100)}% relevant` : ''} - Right-click for more options`}
                       >
                         {source.source === 'onedrive' && <span className={styles.cloudIcon}>☁️</span>}
+                        {source.fromOtherDeal && <span className={styles.otherDealIcon}>⚠️</span>}
                         [{idx + 1}] {source.fileName}
+                        {source.relevanceScore !== undefined && (
+                          <span className={styles.relevanceScore}>
+                            {Math.round(source.relevanceScore * 100)}%
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -720,6 +893,35 @@ export function RightPanel() {
           {isChatLoading ? '...' : 'Send'}
         </button>
       </div>
+
+      {/* Source Context Menu - Using Portal to escape overflow:hidden */}
+      {sourceContextMenu && ReactDOM.createPortal(
+        <div 
+          ref={sourceMenuRef}
+          className={styles.sourceContextMenu}
+          style={{ 
+            top: sourceContextMenu.y, 
+            left: sourceContextMenu.x 
+          }}
+        >
+          <button 
+            className={styles.contextMenuItem}
+            onClick={() => handleOpenInSplitView(sourceContextMenu.source)}
+          >
+            📄 Open in Split View
+          </button>
+          <button 
+            className={styles.contextMenuItem}
+            onClick={() => {
+              handleCitationClick(sourceContextMenu.source);
+              setSourceContextMenu(null);
+            }}
+          >
+            📂 Open in Main View
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

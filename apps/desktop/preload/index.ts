@@ -365,6 +365,97 @@ const api = {
   },
 
   // ==========================================
+  // Export API
+  // ==========================================
+
+  /**
+   * Export deal to PDF
+   */
+  exportDealToPdf: (dealId: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    return ipcRenderer.invoke('export:dealToPdf', dealId);
+  },
+
+  /**
+   * Export pipeline report to PDF
+   */
+  exportPipelineToPdf: (): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    return ipcRenderer.invoke('export:pipelineToPdf');
+  },
+
+  // ==========================================
+  // Usage Tracking API
+  // ==========================================
+
+  /**
+   * Get current usage stats
+   */
+  getUsageStats: (): Promise<{
+    aiMessagesThisMonth: number;
+    aiMessagesToday: number;
+    dealsCreatedThisMonth: number;
+    documentsIndexedThisMonth: number;
+    lastResetDate: string;
+  }> => {
+    return ipcRenderer.invoke('usage:getStats');
+  },
+
+  /**
+   * Get usage limits
+   */
+  getUsageLimits: (): Promise<{
+    aiMessagesPerMonth: number;
+    dealsPerMonth: number;
+    documentsPerMonth: number;
+  }> => {
+    return ipcRenderer.invoke('usage:getLimits');
+  },
+
+  /**
+   * Check if within usage limits
+   */
+  checkUsageLimits: (): Promise<{
+    withinLimits: boolean;
+    warnings: string[];
+    aiMessagesRemaining: number;
+    dealsRemaining: number;
+    documentsRemaining: number;
+  }> => {
+    return ipcRenderer.invoke('usage:checkLimits');
+  },
+
+  /**
+   * Get usage percentages for progress bars
+   */
+  getUsagePercentages: (): Promise<{
+    aiMessages: number;
+    deals: number;
+    documents: number;
+  }> => {
+    return ipcRenderer.invoke('usage:getPercentages');
+  },
+
+  /**
+   * Track AI message sent
+   */
+  trackAiMessage: (): Promise<void> => {
+    return ipcRenderer.invoke('usage:trackAiMessage');
+  },
+
+  /**
+   * Track deal created
+   */
+  trackDealCreated: (): Promise<void> => {
+    return ipcRenderer.invoke('usage:trackDealCreated');
+  },
+
+  /**
+   * Track document indexed
+   */
+  trackDocumentIndexed: (): Promise<void> => {
+    return ipcRenderer.invoke('usage:trackDocumentIndexed');
+  },
+
+  // ==========================================
   // Deal Activities API
   // ==========================================
 
@@ -659,6 +750,13 @@ const api = {
   },
 
   /**
+   * Reset password - sends reset email
+   */
+  authResetPassword: (email: string): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('auth:resetPassword', email);
+  },
+
+  /**
    * Get current user
    */
   authGetCurrentUser: (): Promise<{ user: any; session: any } | null> => {
@@ -677,6 +775,99 @@ const api = {
    */
   authOpenCheckout: (): Promise<{ success: boolean; error?: string }> => {
     return ipcRenderer.invoke('auth:openCheckout');
+  },
+
+  // Knowledge Base APIs
+  knowledgeProfileGetAll: (): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET_ALL);
+  },
+
+  knowledgeProfileGet: (id: string): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET, id);
+  },
+
+  knowledgeProfileCreate: (data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_CREATE, data);
+  },
+
+  knowledgeProfileUpdate: (id: string, data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_UPDATE, id, data);
+  },
+
+  knowledgeProfileDelete: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_DELETE, id);
+  },
+
+  knowledgeProfileSetActive: (id: string | null): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_SET_ACTIVE, id);
+  },
+
+  knowledgeProfileGetActive: (): Promise<{ profile: any; fullGuidelines: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET_ACTIVE);
+  },
+
+  // Knowledge Documents
+  knowledgeDocAdd: (data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_DOC_ADD, data);
+  },
+
+  knowledgeDocRemove: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_DOC_REMOVE, id);
+  },
+
+  knowledgeDocGetByProfile: (profileId: string): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.KNOWLEDGE_DOC_GET_BY_PROFILE, profileId);
+  },
+
+  // Document Templates
+  templateGetAll: (): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_GET_ALL);
+  },
+
+  templateGet: (id: string): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_GET, id);
+  },
+
+  templateCreate: (data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_CREATE, data);
+  },
+
+  templateUpdate: (id: string, data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_UPDATE, id, data);
+  },
+
+  templateDelete: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_DELETE, id);
+  },
+
+  // Memos
+  memoGenerate: (request: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_GENERATE, request);
+  },
+
+  memoGetByDeal: (dealId: string): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_GET_BY_DEAL, dealId);
+  },
+
+  memoGet: (id: string): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_GET, id);
+  },
+
+  memoUpdate: (id: string, data: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_UPDATE, id, data);
+  },
+
+  memoDelete: (id: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_DELETE, id);
+  },
+
+  memoExport: (id: string, format: 'md' | 'txt' | 'pdf'): Promise<string | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMO_EXPORT, id, format);
+  },
+
+  // File selection dialog
+  selectFiles: (options: { title?: string; filters?: any[]; properties?: string[] }): Promise<string[] | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SELECT_FILES, options);
   },
 };
 

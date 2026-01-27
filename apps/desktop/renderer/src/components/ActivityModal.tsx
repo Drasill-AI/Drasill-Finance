@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
-import { DealActivityType, DealActivity, ActivitySource } from '@drasill/shared';
+import { DealActivityType, DealActivity, ActivitySource, ACTIVITY_TEMPLATES } from '@drasill/shared';
 import styles from './ActivityModal.module.css';
 
 const ACTIVITY_TYPES: { value: DealActivityType; label: string }[] = [
@@ -246,6 +246,30 @@ export function ActivityModal() {
               <label className={styles.label}>
                 Description <span className={styles.required}>*</span>
               </label>
+              {/* Quick Templates */}
+              <div className={styles.templateSection}>
+                <select
+                  className={styles.templateSelect}
+                  value=""
+                  onChange={(e) => {
+                    const template = ACTIVITY_TEMPLATES.find(t => t.label === e.target.value);
+                    if (template) {
+                      setFormData(prev => ({
+                        ...prev,
+                        description: template.label,
+                        type: template.type,
+                      }));
+                    }
+                  }}
+                >
+                  <option value="">Use template...</option>
+                  {ACTIVITY_TEMPLATES.map((template, idx) => (
+                    <option key={idx} value={template.label}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <textarea
                 className={styles.textarea}
                 value={formData.description}

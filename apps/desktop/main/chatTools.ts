@@ -13,6 +13,7 @@ import {
   getActivitiesForDeal,
   calculatePipelineAnalytics,
   addActivitySource,
+  getRelevanceThresholds,
 } from './database';
 import { processSchematicToolCall } from './schematic';
 import { createAndOpenEmailDraft, generateEmailBody, type EmailDraft } from './outlook';
@@ -362,6 +363,9 @@ export interface ChatToolContext {
     pageNumber?: number;
     source?: 'local' | 'onedrive';
     oneDriveId?: string;
+    relevanceScore?: number;
+    fromOtherDeal?: boolean;
+    dealId?: string;
   }>;
 }
 
@@ -530,11 +534,25 @@ function executeAddDealActivity(args: Record<string, unknown>, context?: ChatToo
   const activity = createDealActivity(activityData);
 
   // Attach sources from chat context if requested
+  // Filter to high-relevance sources only (>= activity threshold) and exclude sources from other deals
   let sourcesAdded = 0;
   if (useChatSources && context?.ragSources && context.ragSources.length > 0 && activity.id) {
+    const { activityThreshold } = getRelevanceThresholds();
+    
+    // Filter and sort by relevance score
+    const highRelevanceSources = context.ragSources
+      .filter(s => {
+        // Include if no score (backwards compat) or above threshold
+        const hasGoodScore = s.relevanceScore === undefined || s.relevanceScore >= activityThreshold;
+        // Exclude sources from other deals
+        const isCurrentDeal = !s.fromOtherDeal;
+        return hasGoodScore && isCurrentDeal;
+      })
+      .sort((a, b) => (b.relevanceScore ?? 1) - (a.relevanceScore ?? 1));
+    
     // De-duplicate sources by file path
     const seenPaths = new Set<string>();
-    for (const ragSource of context.ragSources) {
+    for (const ragSource of highRelevanceSources) {
       if (!seenPaths.has(ragSource.filePath)) {
         seenPaths.add(ragSource.filePath);
         try {
@@ -542,12 +560,20 @@ function executeAddDealActivity(args: Record<string, unknown>, context?: ChatToo
             fileName: ragSource.fileName,
             filePath: ragSource.filePath,
             section: ragSource.section,
+            pageNumber: ragSource.pageNumber,
+            source: ragSource.source,
+            oneDriveId: ragSource.oneDriveId,
           });
           sourcesAdded++;
         } catch (err) {
           console.error('[ChatTools] Failed to add activity source:', err);
         }
       }
+    }
+    
+    const skippedCount = context.ragSources.length - highRelevanceSources.length;
+    if (skippedCount > 0) {
+      console.log(`[ChatTools] Skipped ${skippedCount} low-relevance or other-deal sources for activity`);
     }
   }
 
@@ -850,17 +876,29 @@ async function executeDraftEmail(args: Record<string, unknown>, context?: ChatTo
 
 /**
  * Build deal context for the system prompt
+ * @param currentDealId - Optional ID of the currently focused deal
  */
-export function buildDealContext(): string {
+export function buildDealContext(currentDealId?: string): string {
   const deals = getAllDeals();
 
   if (deals.length === 0) {
     return 'No deals have been added to the pipeline yet.';
   }
 
-  const dealList = deals.map(deal =>
-    `- ${deal.borrowerName} [${deal.dealNumber}] - $${deal.loanAmount.toLocaleString()} - Stage: ${deal.stage}${deal.priority === 'high' ? ' ⚠️ HIGH PRIORITY' : ''}`
-  ).join('\n');
+  // Find the current deal if specified
+  const currentDeal = currentDealId ? deals.find(d => d.id === currentDealId) : null;
+  
+  // Build current deal focus section if applicable
+  let currentDealSection = '';
+  if (currentDeal) {
+    currentDealSection = `\n--- CURRENT DEAL FOCUS ---\nYou are currently focused on: ${currentDeal.borrowerName} (${currentDeal.dealNumber})\nStage: ${currentDeal.stage} | Amount: $${currentDeal.loanAmount.toLocaleString()}${currentDeal.priority === 'high' ? ' | ⚠️ HIGH PRIORITY' : ''}\nWhen answering questions, prioritize information related to this deal.\n--- END CURRENT DEAL FOCUS ---\n`;
+  }
+
+  const dealList = deals.map(deal => {
+    const isCurrent = deal.id === currentDealId;
+    const marker = isCurrent ? '▶ ' : '- ';
+    return `${marker}${deal.borrowerName} [${deal.dealNumber}] - $${deal.loanAmount.toLocaleString()} - Stage: ${deal.stage}${deal.priority === 'high' ? ' ⚠️ HIGH PRIORITY' : ''}${isCurrent ? ' (CURRENT)' : ''}`;
+  }).join('\n');
 
   // Get recent activities across all deals
   const recentActivities = getAllActivities().slice(0, 5);
@@ -871,5 +909,5 @@ export function buildDealContext(): string {
       }).join('\n')
     : '';
 
-  return `Deal Pipeline (${deals.length} deals):\n${dealList}${recentActivitiesText}`;
+  return `${currentDealSection}Deal Pipeline (${deals.length} deals):\n${dealList}${recentActivitiesText}`;
 }

@@ -23,6 +23,11 @@ import {
   ChatMessage,
   ChatSessionSource,
   ActivitySource,
+  KnowledgeProfile,
+  KnowledgeDocument,
+  DocumentTemplate,
+  GeneratedMemo,
+  MemoGenerationRequest,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
 import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady } from './rag';
@@ -50,6 +55,7 @@ import {
   signUp,
   signIn,
   signOut,
+  resetPassword,
   getCurrentUser,
   checkSubscription,
   createCheckoutSession,
@@ -76,9 +82,66 @@ import {
   addActivitySource,
   removeActivitySource,
   getActivitiesWithSources,
+  // Knowledge Base functions
+  createKnowledgeProfile,
+  getKnowledgeProfile,
+  getAllKnowledgeProfiles,
+  getActiveProfileWithInheritance,
+  setActiveKnowledgeProfile,
+  updateKnowledgeProfile,
+  deleteKnowledgeProfile,
+  addKnowledgeDocument,
+  getKnowledgeDocumentsByProfile,
+  removeKnowledgeDocument,
+  createDocumentTemplate,
+  getDocumentTemplate,
+  getAllDocumentTemplates,
+  updateDocumentTemplate,
+  deleteDocumentTemplate,
+  createGeneratedMemo,
+  getGeneratedMemo,
+  getMemosByDeal,
+  updateGeneratedMemo,
+  deleteGeneratedMemo,
 } from './database';
+import {
+  exportDealToPDF,
+  exportPipelineToPDF,
+} from './pdfExport';
+import {
+  initUsageTracking,
+  incrementUsage,
+  getUsageStats,
+  getUsageLimits,
+  checkUsageLimits,
+  getUsagePercentages,
+  UsageStats,
+  UsageLimits,
+} from './usage';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for reading files
+
+/**
+ * Validate and sanitize a file path to prevent path traversal attacks
+ * Ensures the path doesn't escape the intended directory
+ */
+function validateFilePath(filePath: string, workspacePath?: string): string {
+  // Resolve to absolute path
+  const resolvedPath = path.resolve(filePath);
+  
+  // Check for path traversal attempts
+  if (filePath.includes('..')) {
+    // After resolving, ensure we're still within allowed boundaries
+    if (workspacePath) {
+      const resolvedWorkspace = path.resolve(workspacePath);
+      if (!resolvedPath.startsWith(resolvedWorkspace)) {
+        throw new Error('Access denied: Path traversal detected');
+      }
+    }
+  }
+  
+  return resolvedPath;
+}
 
 // State persistence store
 const stateStore = new Store<{ appState: PersistedState }>({
@@ -111,6 +174,25 @@ export function setupIpcHandlers(): void {
     }
 
     return result.filePaths[0];
+  });
+
+  // Select files
+  ipcMain.handle(IPC_CHANNELS.SELECT_FILES, async (_event, options: {
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+    properties?: ('openFile' | 'multiSelections')[];
+  }): Promise<string[] | null> => {
+    const result = await dialog.showOpenDialog({
+      title: options.title || 'Select Files',
+      filters: options.filters,
+      properties: options.properties || ['openFile'],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return result.filePaths;
   });
 
   // Read directory contents
@@ -153,25 +235,28 @@ export function setupIpcHandlers(): void {
 
       return results;
     } catch (error) {
-      console.error('Error reading directory:', error);
-      throw new Error(`Failed to read directory: ${dirPath}`);
+      console.error('Error reading directory:', dirPath, error);
+      throw new Error('Failed to read directory');
     }
   });
 
   // Read file contents
   ipcMain.handle(IPC_CHANNELS.READ_FILE, async (_event, filePath: string): Promise<FileReadResult> => {
     try {
+      // Validate path
+      const safePath = validateFilePath(filePath);
+      
       // Check file size first
-      const stats = await fs.stat(filePath);
+      const stats = await fs.stat(safePath);
       
       if (stats.size > MAX_FILE_SIZE) {
         throw new Error(`File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`);
       }
 
-      const content = await fs.readFile(filePath, 'utf-8');
+      const content = await fs.readFile(safePath, 'utf-8');
       
       return {
-        path: filePath,
+        path: safePath,
         content,
         encoding: 'utf-8',
       };
@@ -179,14 +264,17 @@ export function setupIpcHandlers(): void {
       if (error instanceof Error) {
         throw error;
       }
-      throw new Error(`Failed to read file: ${filePath}`);
+      throw new Error(`Failed to read file`);
     }
   });
 
   // Read file as binary (Base64) for PDFs and other binary files
   ipcMain.handle(IPC_CHANNELS.READ_FILE_BINARY, async (_event, filePath: string): Promise<{ path: string; data: string }> => {
     try {
-      const stats = await fs.stat(filePath);
+      // Validate path
+      const safePath = validateFilePath(filePath);
+      
+      const stats = await fs.stat(safePath);
       
       // 20MB limit for binary files
       const MAX_BINARY_SIZE = 20 * 1024 * 1024;
@@ -194,18 +282,18 @@ export function setupIpcHandlers(): void {
         throw new Error(`File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB exceeds ${MAX_BINARY_SIZE / 1024 / 1024}MB limit`);
       }
 
-      const buffer = await fs.readFile(filePath);
+      const buffer = await fs.readFile(safePath);
       const base64 = buffer.toString('base64');
       
       return {
-        path: filePath,
+        path: safePath,
         data: base64,
       };
     } catch (error) {
       if (error instanceof Error) {
         throw error;
       }
-      throw new Error(`Failed to read binary file: ${filePath}`);
+      throw new Error(`Failed to read binary file`);
     }
   });
 
@@ -221,10 +309,11 @@ export function setupIpcHandlers(): void {
         content: result.value,
       };
     } catch (error) {
+      console.error('Error reading Word file:', filePath, error);
       if (error instanceof Error) {
         throw error;
       }
-      throw new Error(`Failed to read Word file: ${filePath}`);
+      throw new Error('Failed to read Word file');
     }
   });
 
@@ -429,7 +518,8 @@ export function setupIpcHandlers(): void {
         mtime: stats.mtimeMs,
       };
     } catch (error) {
-      throw new Error(`Failed to stat: ${targetPath}`);
+      console.error('Error getting file stats:', targetPath, error);
+      throw new Error('Failed to get file info');
     }
   });
 
@@ -542,7 +632,9 @@ export function setupIpcHandlers(): void {
 
   // Add deal
   ipcMain.handle(IPC_CHANNELS.DEAL_ADD, async (_event, deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>): Promise<Deal> => {
-    return createDeal(deal);
+    const newDeal = createDeal(deal);
+    incrementUsage('deals_created');
+    return newDeal;
   });
 
   // Import deals from CSV
@@ -739,6 +831,85 @@ export function setupIpcHandlers(): void {
     return deleteDeal(id);
   });
 
+  // Export deal to PDF
+  ipcMain.handle('export:dealToPdf', async (_event, dealId: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (!mainWindow) {
+      return { success: false, error: 'No window available' };
+    }
+    
+    const deal = getDeal(dealId);
+    if (!deal) {
+      return { success: false, error: 'Deal not found' };
+    }
+    
+    const activities = getActivitiesForDeal(dealId);
+    return await exportDealToPDF(mainWindow, deal, activities);
+  });
+
+  // Export pipeline to PDF
+  ipcMain.handle('export:pipelineToPdf', async (): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (!mainWindow) {
+      return { success: false, error: 'No window available' };
+    }
+    
+    const deals = getAllDeals();
+    return await exportPipelineToPDF(mainWindow, deals);
+  });
+
+  // ==========================================
+  // Usage Tracking
+  // ==========================================
+
+  // Initialize usage tracking on startup
+  initUsageTracking();
+
+  // Get usage stats
+  ipcMain.handle('usage:getStats', async (): Promise<UsageStats> => {
+    return getUsageStats();
+  });
+
+  // Get usage limits
+  ipcMain.handle('usage:getLimits', async (): Promise<UsageLimits> => {
+    return getUsageLimits();
+  });
+
+  // Check usage limits
+  ipcMain.handle('usage:checkLimits', async (): Promise<{
+    withinLimits: boolean;
+    warnings: string[];
+    aiMessagesRemaining: number;
+    dealsRemaining: number;
+    documentsRemaining: number;
+  }> => {
+    return checkUsageLimits();
+  });
+
+  // Get usage percentages for display
+  ipcMain.handle('usage:getPercentages', async (): Promise<{
+    aiMessages: number;
+    deals: number;
+    documents: number;
+  }> => {
+    return getUsagePercentages();
+  });
+
+  // Track AI message (called from chat)
+  ipcMain.handle('usage:trackAiMessage', async (): Promise<void> => {
+    incrementUsage('ai_messages');
+  });
+
+  // Track deal created
+  ipcMain.handle('usage:trackDealCreated', async (): Promise<void> => {
+    incrementUsage('deals_created');
+  });
+
+  // Track document indexed
+  ipcMain.handle('usage:trackDocumentIndexed', async (): Promise<void> => {
+    incrementUsage('documents_indexed');
+  });
+
   // Detect deal from file path - match deal by borrower name patterns in path
   ipcMain.handle(IPC_CHANNELS.DEAL_DETECT_FROM_PATH, async (_event, filePath: string): Promise<Deal | null> => {
     const allDeals = getAllDeals();
@@ -912,6 +1083,16 @@ export function setupIpcHandlers(): void {
       return await signOut();
     } catch (error) {
       console.error('[IPC] Sign out error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Reset password
+  ipcMain.handle('auth:resetPassword', async (_event, email: string) => {
+    try {
+      return await resetPassword(email);
+    } catch (error) {
+      console.error('[IPC] Reset password error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
@@ -1170,6 +1351,308 @@ export function setupIpcHandlers(): void {
       return addChatMessage(sessionId, message);
     } catch (error) {
       console.error('[IPC] Add chat message error:', error);
+      throw error;
+    }
+  });
+
+  // =============================================================================
+  // KNOWLEDGE PROFILE HANDLERS
+  // =============================================================================
+
+  // Get all knowledge profiles
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET_ALL, async (): Promise<KnowledgeProfile[]> => {
+    try {
+      console.log('[IPC] Getting all knowledge profiles');
+      return getAllKnowledgeProfiles();
+    } catch (error) {
+      console.error('[IPC] Get all knowledge profiles error:', error);
+      throw error;
+    }
+  });
+
+  // Get a single knowledge profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET, async (_event, id: string): Promise<KnowledgeProfile | null> => {
+    try {
+      console.log('[IPC] Getting knowledge profile:', id);
+      return getKnowledgeProfile(id);
+    } catch (error) {
+      console.error('[IPC] Get knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // Create a new knowledge profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_CREATE, async (_event, data: Partial<KnowledgeProfile>): Promise<KnowledgeProfile> => {
+    try {
+      console.log('[IPC] Creating knowledge profile:', data.name);
+      return createKnowledgeProfile(data);
+    } catch (error) {
+      console.error('[IPC] Create knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // Update a knowledge profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_UPDATE, async (_event, id: string, data: Partial<KnowledgeProfile>): Promise<KnowledgeProfile | null> => {
+    try {
+      console.log('[IPC] Updating knowledge profile:', id);
+      return updateKnowledgeProfile(id, data);
+    } catch (error) {
+      console.error('[IPC] Update knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // Delete a knowledge profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_DELETE, async (_event, id: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Deleting knowledge profile:', id);
+      return deleteKnowledgeProfile(id);
+    } catch (error) {
+      console.error('[IPC] Delete knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // Set active knowledge profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_SET_ACTIVE, async (_event, id: string | null): Promise<boolean> => {
+    try {
+      console.log('[IPC] Setting active knowledge profile:', id);
+      return setActiveKnowledgeProfile(id);
+    } catch (error) {
+      console.error('[IPC] Set active knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // Get active knowledge profile with inherited guidelines
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_PROFILE_GET_ACTIVE, async (): Promise<{ profile: KnowledgeProfile | null; fullGuidelines: string }> => {
+    try {
+      console.log('[IPC] Getting active knowledge profile with inheritance');
+      return getActiveProfileWithInheritance();
+    } catch (error) {
+      console.error('[IPC] Get active knowledge profile error:', error);
+      throw error;
+    }
+  });
+
+  // =============================================================================
+  // KNOWLEDGE DOCUMENT HANDLERS
+  // =============================================================================
+
+  // Add document to a profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_DOC_ADD, async (_event, data: Partial<KnowledgeDocument>): Promise<KnowledgeDocument> => {
+    try {
+      console.log('[IPC] Adding knowledge document:', data.fileName);
+      return addKnowledgeDocument(data);
+    } catch (error) {
+      console.error('[IPC] Add knowledge document error:', error);
+      throw error;
+    }
+  });
+
+  // Remove document from a profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_DOC_REMOVE, async (_event, id: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Removing knowledge document:', id);
+      return removeKnowledgeDocument(id);
+    } catch (error) {
+      console.error('[IPC] Remove knowledge document error:', error);
+      throw error;
+    }
+  });
+
+  // Get documents for a profile
+  ipcMain.handle(IPC_CHANNELS.KNOWLEDGE_DOC_GET_BY_PROFILE, async (_event, profileId: string): Promise<KnowledgeDocument[]> => {
+    try {
+      console.log('[IPC] Getting knowledge documents for profile:', profileId);
+      return getKnowledgeDocumentsByProfile(profileId);
+    } catch (error) {
+      console.error('[IPC] Get knowledge documents error:', error);
+      throw error;
+    }
+  });
+
+  // =============================================================================
+  // DOCUMENT TEMPLATE HANDLERS
+  // =============================================================================
+
+  // Get all templates
+  ipcMain.handle(IPC_CHANNELS.TEMPLATE_GET_ALL, async (): Promise<DocumentTemplate[]> => {
+    try {
+      console.log('[IPC] Getting all document templates');
+      return getAllDocumentTemplates();
+    } catch (error) {
+      console.error('[IPC] Get all templates error:', error);
+      throw error;
+    }
+  });
+
+  // Get a single template
+  ipcMain.handle(IPC_CHANNELS.TEMPLATE_GET, async (_event, id: string): Promise<DocumentTemplate | null> => {
+    try {
+      console.log('[IPC] Getting document template:', id);
+      return getDocumentTemplate(id);
+    } catch (error) {
+      console.error('[IPC] Get template error:', error);
+      throw error;
+    }
+  });
+
+  // Create a new template
+  ipcMain.handle(IPC_CHANNELS.TEMPLATE_CREATE, async (_event, data: Partial<DocumentTemplate>): Promise<DocumentTemplate> => {
+    try {
+      console.log('[IPC] Creating document template:', data.name);
+      return createDocumentTemplate(data);
+    } catch (error) {
+      console.error('[IPC] Create template error:', error);
+      throw error;
+    }
+  });
+
+  // Update a template
+  ipcMain.handle(IPC_CHANNELS.TEMPLATE_UPDATE, async (_event, id: string, data: Partial<DocumentTemplate>): Promise<DocumentTemplate | null> => {
+    try {
+      console.log('[IPC] Updating document template:', id);
+      return updateDocumentTemplate(id, data);
+    } catch (error) {
+      console.error('[IPC] Update template error:', error);
+      throw error;
+    }
+  });
+
+  // Delete a template
+  ipcMain.handle(IPC_CHANNELS.TEMPLATE_DELETE, async (_event, id: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Deleting document template:', id);
+      return deleteDocumentTemplate(id);
+    } catch (error) {
+      console.error('[IPC] Delete template error:', error);
+      throw error;
+    }
+  });
+
+  // =============================================================================
+  // GENERATED MEMO HANDLERS
+  // =============================================================================
+
+  // Generate a memo (AI-powered)
+  ipcMain.handle(IPC_CHANNELS.MEMO_GENERATE, async (_event, request: MemoGenerationRequest): Promise<GeneratedMemo> => {
+    try {
+      console.log('[IPC] Generating memo for deal:', request.dealId);
+      
+      // Get the template
+      const template = getDocumentTemplate(request.templateId);
+      if (!template) {
+        throw new Error('Template not found');
+      }
+      
+      // Get the deal
+      const deal = getDeal(request.dealId);
+      if (!deal) {
+        throw new Error('Deal not found');
+      }
+      
+      // Get active profile for context
+      const { profile } = getActiveProfileWithInheritance();
+      
+      // For now, create a memo with placeholder content that will be filled by the AI
+      // The actual AI generation will be triggered from the renderer after this memo is created
+      const memo = createGeneratedMemo({
+        dealId: request.dealId,
+        templateId: request.templateId,
+        templateName: template.name,
+        profileId: profile?.id || request.profileId,
+        content: template.content || '',
+        manualFields: request.fieldValues || {},
+        inferredFields: {},
+        status: 'draft',
+        version: 1,
+      });
+      
+      return memo;
+    } catch (error) {
+      console.error('[IPC] Generate memo error:', error);
+      throw error;
+    }
+  });
+
+  // Get memos for a deal
+  ipcMain.handle(IPC_CHANNELS.MEMO_GET_BY_DEAL, async (_event, dealId: string): Promise<GeneratedMemo[]> => {
+    try {
+      console.log('[IPC] Getting memos for deal:', dealId);
+      return getMemosByDeal(dealId);
+    } catch (error) {
+      console.error('[IPC] Get memos by deal error:', error);
+      throw error;
+    }
+  });
+
+  // Get a single memo
+  ipcMain.handle(IPC_CHANNELS.MEMO_GET, async (_event, id: string): Promise<GeneratedMemo | null> => {
+    try {
+      console.log('[IPC] Getting memo:', id);
+      return getGeneratedMemo(id);
+    } catch (error) {
+      console.error('[IPC] Get memo error:', error);
+      throw error;
+    }
+  });
+
+  // Update a memo
+  ipcMain.handle(IPC_CHANNELS.MEMO_UPDATE, async (_event, id: string, data: Partial<GeneratedMemo>): Promise<GeneratedMemo | null> => {
+    try {
+      console.log('[IPC] Updating memo:', id);
+      return updateGeneratedMemo(id, data);
+    } catch (error) {
+      console.error('[IPC] Update memo error:', error);
+      throw error;
+    }
+  });
+
+  // Delete a memo
+  ipcMain.handle(IPC_CHANNELS.MEMO_DELETE, async (_event, id: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Deleting memo:', id);
+      return deleteGeneratedMemo(id);
+    } catch (error) {
+      console.error('[IPC] Delete memo error:', error);
+      throw error;
+    }
+  });
+
+  // Export memo to file
+  ipcMain.handle(IPC_CHANNELS.MEMO_EXPORT, async (_event, id: string, format: 'md' | 'txt' | 'pdf'): Promise<string | null> => {
+    try {
+      console.log('[IPC] Exporting memo:', id, 'as', format);
+      
+      const memo = getGeneratedMemo(id);
+      if (!memo) {
+        throw new Error('Memo not found');
+      }
+      
+      const deal = getDeal(memo.dealId);
+      const defaultFileName = `${deal?.borrowerName || 'memo'}_${memo.templateName || 'document'}_${new Date().toISOString().split('T')[0]}`;
+      
+      const result = await dialog.showSaveDialog({
+        defaultPath: `${defaultFileName}.${format === 'pdf' ? 'md' : format}`,
+        filters: [
+          { name: format.toUpperCase(), extensions: [format === 'pdf' ? 'md' : format] },
+        ],
+      });
+      
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      
+      await fs.writeFile(result.filePath, memo.content, 'utf-8');
+      
+      // Update memo status to exported
+      updateGeneratedMemo(id, { status: 'exported' });
+      
+      return result.filePath;
+    } catch (error) {
+      console.error('[IPC] Export memo error:', error);
       throw error;
     }
   });

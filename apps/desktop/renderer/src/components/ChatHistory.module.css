@@ -20,6 +20,32 @@
   color: var(--text-primary);
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exportAllButton {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.exportAllButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
 .closeButton {
   background: none;
   border: none;
@@ -34,6 +60,54 @@
 .closeButton:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* Search Bar */
+.searchBar {
+  padding: 8px 12px;
+  position: relative;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 30px 8px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+}
+
+.searchInput::placeholder {
+  color: var(--text-muted);
+}
+
+.clearSearch {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.clearSearch:hover {
+  opacity: 1;
 }
 
 .content {
@@ -172,6 +246,7 @@
   color: var(--text-muted);
 }
 
+.exportButton,
 .deleteButton {
   background: none;
   border: none;
@@ -183,8 +258,14 @@
   border-radius: 3px;
 }
 
+.sessionItem:hover .exportButton,
 .sessionItem:hover .deleteButton {
   opacity: 0.6;
+}
+
+.exportButton:hover {
+  opacity: 1 !important;
+  background: rgba(100, 200, 100, 0.1);
 }
 
 .deleteButton:hover {
@@ -192,10 +273,12 @@
   background: rgba(255, 100, 100, 0.1);
 }
 
+.sessionItem.active .exportButton,
 .sessionItem.active .deleteButton {
   opacity: 0.7;
 }
 
+.sessionItem.active .exportButton:hover,
 .sessionItem.active .deleteButton:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.2);

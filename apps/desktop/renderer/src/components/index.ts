@@ -13,3 +13,6 @@ export { DealModal } from './DealModal';
 export { ActivityModal } from './ActivityModal';
 export { SchematicViewer } from './SchematicViewer';
 export { OneDrivePicker } from './OneDrivePicker';
+export { KnowledgeBaseModal } from './KnowledgeBaseModal';
+export { TemplateManager } from './TemplateManager';
+export { MemoGenerator } from './MemoGenerator';

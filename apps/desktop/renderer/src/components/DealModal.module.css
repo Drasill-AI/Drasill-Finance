@@ -34,6 +34,62 @@
   border-bottom: 1px solid var(--border-color, #3c3c3c);
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generateDocButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  color: var(--text-secondary, #888888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.generateDocButton:hover {
+  background: #28a745;
+  border-color: #28a745;
+  color: white;
+}
+
+.generateDocButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cloneButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  color: var(--text-secondary, #888888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cloneButton:hover {
+  background: var(--accent, #007acc);
+  border-color: var(--accent, #007acc);
+  color: white;
+}
+
+.cloneButton svg {
+  width: 16px;
+  height: 16px;
+}
+
 .header h2 {
   margin: 0;
   font-size: 16px;
@@ -213,6 +269,109 @@
 .submitButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Deal info section (edit mode) */
+.dealInfo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 20px;
+  background: var(--bg-tertiary, #252526);
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+  font-size: 12px;
+}
+
+.dealNumber {
+  font-weight: 600;
+  color: var(--accent-color, #007acc);
+}
+
+.dealCreated {
+  color: var(--text-secondary, #888888);
+}
+
+/* Footer with delete section */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color, #3c3c3c);
+  gap: 12px;
+}
+
+.deleteSection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deleteButton {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.deleteButton:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+}
+
+.deleteConfirmText {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.deleteConfirmButton {
+  background: #ef4444;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 0.15s;
+}
+
+.deleteConfirmButton:hover {
+  background: #dc2626;
+}
+
+.deleteConfirmButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancelDeleteButton {
+  background: transparent;
+  border: 1px solid var(--border-color, #3c3c3c);
+  color: var(--text-secondary, #888888);
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.cancelDeleteButton:hover {
+  background: var(--bg-hover, #2a2a2a);
+  color: var(--text-primary, #cccccc);
+}
+
+.actionButtons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* Stage badge colors */

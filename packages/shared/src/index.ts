@@ -102,6 +102,8 @@ export interface PersistedState {
   workspaceSource?: 'local' | 'onedrive';
   /** OneDrive folder ID (for cloud workspaces) */
   oneDriveFolderId?: string;
+  /** Whether user has completed onboarding */
+  hasCompletedOnboarding?: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ export interface PersistedState {
  */
 export const IPC_CHANNELS = {
   SELECT_WORKSPACE: 'select-workspace',
+  SELECT_FILES: 'select-files',
   READ_DIR: 'read-dir',
   READ_FILE: 'read-file',
   READ_FILE_BINARY: 'read-file-binary',
@@ -195,6 +198,30 @@ export const IPC_CHANNELS = {
   CHAT_SESSION_GET: 'chat-session-get',
   CHAT_SESSION_GET_ALL: 'chat-session-get-all',
   CHAT_SESSION_ADD_MESSAGE: 'chat-session-add-message',
+  // Knowledge Base
+  KNOWLEDGE_PROFILE_GET_ALL: 'knowledge-profile-get-all',
+  KNOWLEDGE_PROFILE_GET: 'knowledge-profile-get',
+  KNOWLEDGE_PROFILE_CREATE: 'knowledge-profile-create',
+  KNOWLEDGE_PROFILE_UPDATE: 'knowledge-profile-update',
+  KNOWLEDGE_PROFILE_DELETE: 'knowledge-profile-delete',
+  KNOWLEDGE_PROFILE_SET_ACTIVE: 'knowledge-profile-set-active',
+  KNOWLEDGE_PROFILE_GET_ACTIVE: 'knowledge-profile-get-active',
+  KNOWLEDGE_DOC_ADD: 'knowledge-doc-add',
+  KNOWLEDGE_DOC_REMOVE: 'knowledge-doc-remove',
+  KNOWLEDGE_DOC_GET_BY_PROFILE: 'knowledge-doc-get-by-profile',
+  // Document Templates
+  TEMPLATE_GET_ALL: 'template-get-all',
+  TEMPLATE_GET: 'template-get',
+  TEMPLATE_CREATE: 'template-create',
+  TEMPLATE_UPDATE: 'template-update',
+  TEMPLATE_DELETE: 'template-delete',
+  // Memo Generation
+  MEMO_GENERATE: 'memo-generate',
+  MEMO_GET_BY_DEAL: 'memo-get-by-deal',
+  MEMO_GET: 'memo-get',
+  MEMO_UPDATE: 'memo-update',
+  MEMO_DELETE: 'memo-delete',
+  MEMO_EXPORT: 'memo-export',
 } as const;
 
 /**
@@ -209,6 +236,12 @@ export interface RAGSource {
   source?: 'local' | 'onedrive';
   /** OneDrive item ID for cloud files */
   oneDriveId?: string;
+  /** Relevance score (0-1) from hybrid search */
+  relevanceScore?: number;
+  /** Whether this source is from a different deal than the current context */
+  fromOtherDeal?: boolean;
+  /** Associated deal ID if known */
+  dealId?: string;
 }
 
 /**
@@ -239,6 +272,8 @@ export interface ChatRequest {
   message: string;
   context?: FileContext;
   history: ChatMessage[];
+  /** Current deal ID for deal-scoped RAG queries */
+  dealId?: string;
 }
 
 /**
@@ -438,6 +473,7 @@ export interface Deal {
   notes?: string | null;
   expectedCloseDate?: string | null;
   actualCloseDate?: string | null;
+  isPinned?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -446,6 +482,24 @@ export interface Deal {
  * Deal activity types
  */
 export type DealActivityType = 'note' | 'call' | 'email' | 'document' | 'stage_change' | 'meeting';
+
+/**
+ * Activity templates for quick entry
+ */
+export const ACTIVITY_TEMPLATES = [
+  { label: 'Called borrower for update', type: 'call' as DealActivityType },
+  { label: 'Left voicemail for borrower', type: 'call' as DealActivityType },
+  { label: 'Sent follow-up email', type: 'email' as DealActivityType },
+  { label: 'Received financials from borrower', type: 'document' as DealActivityType },
+  { label: 'Received signed documents', type: 'document' as DealActivityType },
+  { label: 'Completed site visit', type: 'meeting' as DealActivityType },
+  { label: 'Met with borrower', type: 'meeting' as DealActivityType },
+  { label: 'Internal deal review meeting', type: 'meeting' as DealActivityType },
+  { label: 'Credit committee presentation', type: 'meeting' as DealActivityType },
+  { label: 'Reviewed credit agreement', type: 'note' as DealActivityType },
+  { label: 'Updated deal terms', type: 'note' as DealActivityType },
+  { label: 'Requested additional documentation', type: 'email' as DealActivityType },
+] as const;
 
 /**
  * Source citation for an activity
@@ -484,6 +538,8 @@ export interface PipelineAnalytics {
   totalPipelineValue: number;
   averageDealSize: number;
   byStage: Record<DealStage, { count: number; totalValue: number }>;
+  recentActivityCount?: number; // Activities in last 7 days
+  dealsAddedThisMonth?: number;
 }
 
 /**
@@ -643,3 +699,277 @@ export interface ChatSession {
 export interface ChatSessionFull extends ChatSession {
   messages: ChatMessage[];
 }
+
+// ==========================================
+// Knowledge Base & Template Types
+// ==========================================
+
+/**
+ * Knowledge profile type (investment strategies, etc.)
+ */
+export type KnowledgeProfileType = 'base' | 'cre' | 'pe' | 'vc' | 'c_and_i' | 'sba' | 'custom';
+
+/**
+ * Knowledge profile for contextual guardrails
+ */
+export interface KnowledgeProfile {
+  id: string;
+  name: string;
+  type: KnowledgeProfileType;
+  description?: string;
+  /** Parent profile ID for inheritance (null for base profiles) */
+  parentId?: string | null;
+  /** Soft guardrails - guidelines for the AI */
+  guidelines: string;
+  /** Key terms/vocabulary specific to this profile */
+  terminology?: string;
+  /** Compliance checks (soft suggestions) */
+  complianceChecks?: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Document stored in a knowledge profile
+ */
+export interface KnowledgeDocument {
+  id: string;
+  profileId: string;
+  fileName: string;
+  filePath: string;
+  category: 'policy' | 'procedure' | 'guideline' | 'example' | 'template' | 'other';
+  description?: string;
+  isIndexed: boolean;
+  source: 'local' | 'onedrive';
+  oneDriveId?: string;
+  createdAt?: string;
+}
+
+/**
+ * Document template for memo generation
+ */
+export interface DocumentTemplate {
+  id: string;
+  name: string;
+  templateType: 'credit_memo' | 'ic_report' | 'approval_letter' | 'term_sheet' | 'commitment_letter' | 'custom';
+  profileId?: string | null;
+  content?: string;
+  filePath?: string;
+  requiredSections?: string[];
+  aiInstructions?: string;
+  defaultFields?: string[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Generated memo record
+ */
+export interface GeneratedMemo {
+  id: string;
+  dealId: string;
+  templateId: string;
+  templateName?: string;
+  profileId?: string;
+  content: string;
+  manualFields?: Record<string, string>;
+  inferredFields?: Record<string, string>;
+  status: 'draft' | 'final' | 'exported';
+  version: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Template variable that needs user input
+ */
+export interface TemplateVariable {
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'currency' | 'select';
+  required: boolean;
+  inferredValue?: string;
+  options?: string[];
+  description?: string;
+}
+
+/**
+ * Request for memo generation
+ */
+export interface MemoGenerationRequest {
+  dealId: string;
+  templateId: string;
+  profileId?: string;
+  fieldValues?: Record<string, string>;
+  additionalInstructions?: string;
+}
+
+/**
+ * Default knowledge profiles for initialization
+ */
+export const DEFAULT_KNOWLEDGE_PROFILES: Omit<KnowledgeProfile, 'id' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'Base Guidelines',
+    type: 'base',
+    description: 'Core lending guidelines that apply to all deal types',
+    parentId: null,
+    guidelines: `You are assisting with lending deal analysis. Always:
+- Verify key financial metrics (debt service coverage, loan-to-value, etc.)
+- Highlight potential risks clearly
+- Reference source documents for all claims
+- Use professional, clear language
+- Flag any missing information that would typically be required`,
+    terminology: 'DSCR (Debt Service Coverage Ratio), LTV (Loan-to-Value), NOI (Net Operating Income), Cap Rate',
+    complianceChecks: 'Verify borrower information is complete, check for regulatory requirements',
+    isActive: false,
+    sortOrder: 0,
+  },
+  {
+    name: 'Commercial Real Estate (CRE)',
+    type: 'cre',
+    description: 'Guidelines for commercial real estate lending',
+    parentId: null,
+    guidelines: `CRE-specific guidelines:
+- Analyze property type (office, retail, industrial, multifamily)
+- Review rent rolls and lease terms
+- Assess market conditions and comparables
+- Evaluate sponsor experience and track record
+- Check environmental considerations
+- Standard LTV limits: 75% stabilized, 65% construction`,
+    terminology: 'Cap Rate, NOI, Rent Roll, WALT (Weighted Average Lease Term), TI (Tenant Improvements)',
+    complianceChecks: 'Environmental Phase I required for all loans >$500K',
+    isActive: false,
+    sortOrder: 1,
+  },
+  {
+    name: 'Private Equity (PE)',
+    type: 'pe',
+    description: 'Guidelines for private equity deal financing',
+    parentId: null,
+    guidelines: `PE-specific guidelines:
+- Analyze sponsor track record and fund performance
+- Review capital structure and leverage ratios
+- Assess management team quality
+- Evaluate exit strategy viability
+- Check fund documentation and LP terms
+- Focus on EBITDA-based metrics`,
+    terminology: 'EBITDA, Multiple, IRR, MOIC (Multiple on Invested Capital), DPI, TVPI',
+    complianceChecks: 'Verify fund authorization for leverage, check LP consent requirements',
+    isActive: false,
+    sortOrder: 2,
+  },
+  {
+    name: 'Venture Capital (VC)',
+    type: 'vc',
+    description: 'Guidelines for venture capital and growth financing',
+    parentId: null,
+    guidelines: `VC-specific guidelines:
+- Focus on growth metrics over profitability
+- Analyze burn rate and runway
+- Assess market opportunity and TAM
+- Review cap table and investor composition
+- Evaluate technology/IP moat
+- Consider stage-appropriate metrics (ARR, MRR, GMV)`,
+    terminology: 'ARR, MRR, CAC, LTV, Burn Rate, Runway, TAM, SAM, SOM',
+    complianceChecks: 'Warrant coverage requirements, board observer rights',
+    isActive: false,
+    sortOrder: 3,
+  },
+  {
+    name: 'C&I Lending',
+    type: 'c_and_i',
+    description: 'Commercial and Industrial lending guidelines',
+    parentId: null,
+    guidelines: `C&I-specific guidelines:
+- Analyze operating cash flow and working capital
+- Review accounts receivable aging
+- Assess inventory turnover
+- Evaluate management and industry position
+- Check collateral (equipment, inventory, receivables)
+- Standard advance rates: 80% A/R, 50% inventory`,
+    terminology: 'ABL (Asset-Based Lending), Borrowing Base, Advance Rate, Field Exam',
+    complianceChecks: 'UCC filings, lien searches, insurance requirements',
+    isActive: false,
+    sortOrder: 4,
+  },
+];
+
+/**
+ * Default document templates
+ */
+export const DEFAULT_DOCUMENT_TEMPLATES: Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'Credit Memo',
+    templateType: 'credit_memo',
+    profileId: null,
+    content: `# Credit Memorandum
+
+## Executive Summary
+[Brief overview of the transaction, borrower, and recommendation]
+
+## Borrower Overview
+- **Borrower Name:** {{borrower_name}}
+- **Industry:** {{industry}}
+- **Years in Business:** {{years_in_business}}
+
+## Transaction Summary
+- **Loan Amount:** {{loan_amount}}
+- **Purpose:** {{loan_purpose}}
+- **Term:** {{term_months}} months
+- **Interest Rate:** {{interest_rate}}%
+- **Collateral:** {{collateral_description}}
+
+## Financial Analysis
+[Analysis of borrower's financial condition]
+
+### Key Metrics
+- **Debt Service Coverage Ratio:** {{dscr}}
+- **Loan-to-Value:** {{ltv}}
+
+## Risk Assessment
+[Identification and mitigation of key risks]
+
+## Recommendation
+[Final recommendation with conditions if applicable]`,
+    requiredSections: ['Executive Summary', 'Borrower Overview', 'Transaction Summary', 'Financial Analysis', 'Risk Assessment', 'Recommendation'],
+    aiInstructions: 'Generate a comprehensive credit memo using the deal information and indexed documents. Cite specific sources for all financial data and risk factors. Infer as much as possible from the deal context.',
+    defaultFields: ['borrower_name', 'loan_amount', 'term_months', 'interest_rate', 'collateral_description'],
+    isActive: true,
+  },
+  {
+    name: 'Investment Committee Report',
+    templateType: 'ic_report',
+    profileId: null,
+    content: `# Investment Committee Report
+
+## Deal Summary
+**Borrower:** {{borrower_name}}
+**Amount:** {{loan_amount}}
+**Date:** {{presentation_date}}
+
+## Investment Thesis
+[Why this is a good investment opportunity]
+
+## Deal Structure
+[Details of the proposed structure]
+
+## Due Diligence Summary
+[Key findings from due diligence]
+
+## Comparable Transactions
+[Relevant precedent transactions]
+
+## Risks & Mitigants
+[Key risks and how they are addressed]
+
+## Committee Recommendation
+[Recommendation for approval/decline with any conditions]`,
+    requiredSections: ['Deal Summary', 'Investment Thesis', 'Deal Structure', 'Due Diligence Summary', 'Risks & Mitigants', 'Committee Recommendation'],
+    aiInstructions: 'Generate a formal IC report suitable for presentation. Focus on investment merits and risks. Use all available deal documents to support the analysis.',
+    defaultFields: ['borrower_name', 'loan_amount', 'presentation_date'],
+    isActive: true,
+  },
+];

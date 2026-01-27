@@ -17,8 +17,13 @@ export function FileExplorer() {
     loginOneDrive,
     setOneDrivePickerOpen,
     isOneDrivePickerOpen,
+    recentFiles,
+    openFile,
+    openOneDriveFile,
+    clearRecentFiles,
   } = useAppStore();
   const [isAdding, setIsAdding] = useState(false);
+  const [showRecentFiles, setShowRecentFiles] = useState(true);
 
   const handleAddFiles = async () => {
     if (!workspacePath || isAdding) return;
@@ -52,6 +57,35 @@ export function FileExplorer() {
     } else {
       setOneDrivePickerOpen(true);
     }
+  };
+
+  const handleOpenRecentFile = async (file: typeof recentFiles[0]) => {
+    if (file.source === 'onedrive' && file.oneDriveId) {
+      // Open OneDrive file
+      await openOneDriveFile({
+        id: file.oneDriveId,
+        name: file.name,
+        path: file.path,
+        isDirectory: false,
+        source: 'onedrive',
+        oneDriveId: file.oneDriveId,
+      });
+    } else {
+      // Open local file
+      await openFile(file.path, file.name);
+    }
+  };
+
+  const formatRelativeTime = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(timestamp).toLocaleDateString();
   };
 
   const workspaceName = workspacePath?.split(/[\\/]/).pop() || 'Workspace';
@@ -106,6 +140,51 @@ export function FileExplorer() {
             <p className={styles.hint}>
               Or use File → Open Workspace Folder
             </p>
+
+            {/* Recent Files Section */}
+            {recentFiles.length > 0 && (
+              <div className={styles.recentFilesSection}>
+                <div 
+                  className={styles.recentFilesHeader}
+                  onClick={() => setShowRecentFiles(!showRecentFiles)}
+                >
+                  <span className={styles.recentFilesToggle}>
+                    {showRecentFiles ? '▼' : '▶'}
+                  </span>
+                  <span>Recent Files</span>
+                  <button 
+                    className={styles.clearRecentButton}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearRecentFiles();
+                    }}
+                    title="Clear recent files"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {showRecentFiles && (
+                  <div className={styles.recentFilesList}>
+                    {recentFiles.map((file, idx) => (
+                      <button
+                        key={`${file.path}-${idx}`}
+                        className={styles.recentFileItem}
+                        onClick={() => handleOpenRecentFile(file)}
+                        title={`${file.path}\n${formatRelativeTime(file.timestamp)}`}
+                      >
+                        <span className={styles.recentFileIcon}>
+                          {file.source === 'onedrive' ? '☁️' : '📄'}
+                        </span>
+                        <span className={styles.recentFileName}>{file.name}</span>
+                        <span className={styles.recentFileTime}>
+                          {formatRelativeTime(file.timestamp)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className={styles.tree}>
