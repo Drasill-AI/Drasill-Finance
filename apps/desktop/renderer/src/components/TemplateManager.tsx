@@ -9,12 +9,12 @@ interface TemplateManagerProps {
 }
 
 const TEMPLATE_TYPE_ICONS: Record<string, string> = {
-  credit_memo: '📋',
-  ic_report: '📊',
-  approval_letter: '✉️',
-  term_sheet: '📄',
-  commitment_letter: '📝',
-  custom: '⚙️',
+  credit_memo: 'CM',
+  ic_report: 'IC',
+  approval_letter: 'AL',
+  term_sheet: 'TS',
+  commitment_letter: 'CL',
+  custom: 'CU',
 };
 
 const TEMPLATE_TYPE_LABELS: Record<string, string> = {
@@ -38,6 +38,10 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({ isOpen, onClos
 
   // Form state
   const [editForm, setEditForm] = useState<Partial<DocumentTemplate>>({});
+  const [newSectionInput, setNewSectionInput] = useState('');
+  const [isAddingSection, setIsAddingSection] = useState(false);
+  const [newFieldInput, setNewFieldInput] = useState('');
+  const [isAddingField, setIsAddingField] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -164,10 +168,24 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({ isOpen, onClos
   };
 
   const handleAddSection = () => {
-    const section = prompt('Enter section name:');
-    if (section && section.trim()) {
+    if (newSectionInput.trim()) {
       const current = editForm.requiredSections || [];
-      handleFormChange('requiredSections', [...current, section.trim()]);
+      // Check for duplicates
+      if (!current.includes(newSectionInput.trim())) {
+        handleFormChange('requiredSections', [...current, newSectionInput.trim()]);
+      }
+      setNewSectionInput('');
+      setIsAddingSection(false);
+    }
+  };
+
+  const handleSectionKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddSection();
+    } else if (e.key === 'Escape') {
+      setNewSectionInput('');
+      setIsAddingSection(false);
     }
   };
 
@@ -177,10 +195,25 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({ isOpen, onClos
   };
 
   const handleAddField = () => {
-    const field = prompt('Enter field name (use snake_case):');
-    if (field && field.trim()) {
+    if (newFieldInput.trim()) {
       const current = editForm.defaultFields || [];
-      handleFormChange('defaultFields', [...current, field.trim().toLowerCase().replace(/\s+/g, '_')]);
+      const formattedField = newFieldInput.trim().toLowerCase().replace(/\s+/g, '_');
+      // Check for duplicates
+      if (!current.includes(formattedField)) {
+        handleFormChange('defaultFields', [...current, formattedField]);
+      }
+      setNewFieldInput('');
+      setIsAddingField(false);
+    }
+  };
+
+  const handleFieldKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddField();
+    } else if (e.key === 'Escape') {
+      setNewFieldInput('');
+      setIsAddingField(false);
     }
   };
 
@@ -350,9 +383,39 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({ isOpen, onClos
                           <button onClick={() => handleRemoveSection(i)}>×</button>
                         </span>
                       ))}
-                      <button className={styles.addChipButton} onClick={handleAddSection}>
-                        + Add Section
-                      </button>
+                      {isAddingSection ? (
+                        <div className={styles.inlineInputWrapper}>
+                          <input
+                            type="text"
+                            className={styles.inlineInput}
+                            value={newSectionInput}
+                            onChange={e => setNewSectionInput(e.target.value)}
+                            onKeyDown={handleSectionKeyDown}
+                            onBlur={() => {
+                              if (!newSectionInput.trim()) {
+                                setIsAddingSection(false);
+                              }
+                            }}
+                            placeholder="Section name..."
+                            autoFocus
+                          />
+                          <button className={styles.inlineConfirmButton} onClick={handleAddSection}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </button>
+                          <button className={styles.inlineCancelButton} onClick={() => { setNewSectionInput(''); setIsAddingSection(false); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </div>
+                      ) : (
+                        <button className={styles.addChipButton} onClick={() => setIsAddingSection(true)}>
+                          + Add Section
+                        </button>
+                      )}
                     </div>
                     <p className={styles.helpText}>
                       Sections that should be included in generated documents.
@@ -368,9 +431,44 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({ isOpen, onClos
                           <button onClick={() => handleRemoveField(i)}>×</button>
                         </span>
                       ))}
-                      <button className={styles.addVariableButton} onClick={handleAddField}>
-                        + Add Field
-                      </button>
+                      {isAddingField ? (
+                        <div className={styles.inlineInputWrapper}>
+                          <input
+                            type="text"
+                            className={styles.inlineInput}
+                            value={newFieldInput}
+                            onChange={e => setNewFieldInput(e.target.value)}
+                            onKeyDown={handleFieldKeyDown}
+                            onBlur={() => {
+                              if (!newFieldInput.trim()) {
+                                setIsAddingField(false);
+                              }
+                            }}
+                            placeholder="field_name"
+                            autoFocus
+                          />
+                          {newFieldInput && (
+                            <span className={styles.fieldPreview}>
+                              → {`{{${newFieldInput.trim().toLowerCase().replace(/\s+/g, '_')}}}`}
+                            </span>
+                          )}
+                          <button className={styles.inlineConfirmButton} onClick={handleAddField}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </button>
+                          <button className={styles.inlineCancelButton} onClick={() => { setNewFieldInput(''); setIsAddingField(false); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </div>
+                      ) : (
+                        <button className={styles.addVariableButton} onClick={() => setIsAddingField(true)}>
+                          + Add Field
+                        </button>
+                      )}
                     </div>
                     <p className={styles.helpText}>
                       Fields that will be prompted for manual input if they can't be inferred from context.

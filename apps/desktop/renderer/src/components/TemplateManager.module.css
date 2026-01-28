@@ -154,7 +154,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.3px;
   flex-shrink: 0;
 }
 
@@ -585,4 +588,66 @@
 .addChipButton:hover {
   border-color: var(--accent, #007acc);
   color: var(--accent, #007acc);
+}
+
+/* Inline input for adding sections/fields */
+.inlineInputWrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-secondary, #2d2d2d);
+  border: 1px solid var(--accent, #007acc);
+  border-radius: 4px;
+}
+
+.inlineInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary, #cccccc);
+  font-size: 12px;
+  width: 140px;
+}
+
+.inlineInput::placeholder {
+  color: var(--text-muted, #666666);
+}
+
+.fieldPreview {
+  font-size: 11px;
+  color: var(--accent, #007acc);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.inlineConfirmButton,
+.inlineCancelButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.inlineConfirmButton {
+  color: #10b981;
+}
+
+.inlineConfirmButton:hover {
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.inlineCancelButton {
+  color: #ef4444;
+}
+
+.inlineCancelButton:hover {
+  background: rgba(239, 68, 68, 0.15);
 }

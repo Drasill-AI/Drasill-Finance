@@ -13,12 +13,12 @@ interface MemoGeneratorProps {
 }
 
 const TEMPLATE_TYPE_ICONS: Record<string, string> = {
-  credit_memo: '📋',
-  ic_report: '📊',
-  approval_letter: '✉️',
-  term_sheet: '📄',
-  commitment_letter: '📝',
-  custom: '⚙️',
+  credit_memo: 'CM',
+  ic_report: 'IC',
+  approval_letter: 'AL',
+  term_sheet: 'TS',
+  commitment_letter: 'CL',
+  custom: 'CU',
 };
 
 const TEMPLATE_TYPE_LABELS: Record<string, string> = {
@@ -275,7 +275,7 @@ export const MemoGenerator: React.FC<MemoGeneratorProps> = ({ isOpen, onClose, d
                     onClick={() => handleSelectTemplate(template.id)}
                   >
                     <div className={`${styles.templateCardIcon} ${styles[template.templateType]}`}>
-                      {TEMPLATE_TYPE_ICONS[template.templateType] || '📄'}
+                      {TEMPLATE_TYPE_ICONS[template.templateType] || 'CU'}
                     </div>
                     <div className={styles.templateCardTitle}>{template.name}</div>
                     <div className={styles.templateCardType}>

@@ -13,13 +13,13 @@ interface KnowledgeBaseModalProps {
 }
 
 const PROFILE_TYPE_ICONS: Record<KnowledgeProfileType, string> = {
-  base: '📚',
-  cre: '🏢',
-  pe: '💼',
-  vc: '🚀',
-  c_and_i: '🏭',
-  sba: '🏛️',
-  custom: '⚙️',
+  base: 'BASE',
+  cre: 'CRE',
+  pe: 'PE',
+  vc: 'VC',
+  c_and_i: 'C&I',
+  sba: 'SBA',
+  custom: 'CU',
 };
 
 const PROFILE_TYPE_LABELS: Record<KnowledgeProfileType, string> = {

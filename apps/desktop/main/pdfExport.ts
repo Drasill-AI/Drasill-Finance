@@ -51,30 +51,32 @@ function formatDate(dateStr: string | null): string {
  */
 function getStageInfo(stage: string): { label: string; color: string } {
   const stages: Record<string, { label: string; color: string }> = {
-    'lead': { label: 'Lead', color: '#9CA3AF' },
-    'qualified': { label: 'Qualified', color: '#3B82F6' },
-    'proposal': { label: 'Proposal', color: '#F59E0B' },
-    'negotiation': { label: 'Negotiation', color: '#8B5CF6' },
-    'closed-won': { label: 'Closed Won', color: '#22C55E' },
-    'closed-lost': { label: 'Closed Lost', color: '#EF4444' },
+    'lead': { label: 'Lead', color: '#6B7280' },
+    'application': { label: 'Application', color: '#3B82F6' },
+    'underwriting': { label: 'Underwriting', color: '#F59E0B' },
+    'approved': { label: 'Approved', color: '#10B981' },
+    'funded': { label: 'Funded', color: '#8B5CF6' },
+    'closed': { label: 'Closed', color: '#22C55E' },
+    'declined': { label: 'Declined', color: '#EF4444' },
   };
-  return stages[stage] || { label: stage, color: '#6B7280' };
+  return stages[stage] || { label: stage.charAt(0).toUpperCase() + stage.slice(1), color: '#6B7280' };
 }
 
 /**
- * Get activity icon HTML
+ * Get activity icon HTML - colored dot indicators
  */
 function getActivityIcon(type: string): string {
-  const icons: Record<string, string> = {
-    'call': '📞',
-    'email': '✉️',
-    'meeting': '🤝',
-    'note': '📝',
-    'document': '📄',
-    'stage_change': '📊',
-    'task': '✓',
+  const colors: Record<string, string> = {
+    'call': '#34D399',
+    'email': '#60A5FA',
+    'meeting': '#A78BFA',
+    'note': '#9CA3AF',
+    'document': '#FB923C',
+    'stage_change': '#EC4899',
+    'task': '#10B981',
   };
-  return icons[type] || '•';
+  const color = colors[type] || '#6B7280';
+  return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};"></span>`;
 }
 
 /**
@@ -400,7 +402,7 @@ export function generatePipelineReportHTML(deals: Deal[], logoBase64: string = '
     return acc;
   }, {} as Record<string, { deals: Deal[]; value: number }>);
 
-  const stageOrder = ['lead', 'qualified', 'proposal', 'negotiation', 'closed-won', 'closed-lost'];
+  const stageOrder = ['lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined'];
   
   const stagesHTML = stageOrder
     .filter(stage => stageGroups[stage])

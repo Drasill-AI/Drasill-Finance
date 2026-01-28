@@ -542,7 +542,7 @@ export function RightPanel() {
             {ragChunksCount > 0 ? (
               <>
                 <p className={styles.ragStatus}>
-                  📚 {ragChunksCount} chunks indexed
+                  {ragChunksCount} chunks indexed
                 </p>
                 <div className={styles.ragButtons}>
                   <button 
@@ -786,7 +786,7 @@ export function RightPanel() {
             )}
             {ragChunksCount > 0 && (
               <p className={styles.ragHint}>
-                📚 {ragChunksCount} chunks indexed - Ready to answer questions!
+                {ragChunksCount} chunks indexed - Ready to answer questions!
               </p>
             )}
             {fileContext && (
