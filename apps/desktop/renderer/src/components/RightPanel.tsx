@@ -200,6 +200,10 @@ export function RightPanel() {
   const [activeProfile, setActiveProfile] = useState<KnowledgeProfile | null>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   
+  // HubSpot connection state
+  const [hubspotStatus, setHubspotStatus] = useState<{ connected: boolean; email?: string; portalId?: string }>({ connected: false });
+  const [isConnectingHubspot, setIsConnectingHubspot] = useState(false);
+  
   const {
     chatMessages,
     isChatLoading,
@@ -255,6 +259,44 @@ export function RightPanel() {
   useEffect(() => {
     loadProfiles();
   }, []);
+
+  // Load HubSpot status
+  useEffect(() => {
+    const checkHubspotStatus = async () => {
+      try {
+        const status = await window.electronAPI.getHubSpotAuthStatus();
+        setHubspotStatus(status);
+      } catch (error) {
+        console.error('Failed to check HubSpot status:', error);
+      }
+    };
+    checkHubspotStatus();
+  }, []);
+
+  // HubSpot connection handlers
+  const handleConnectHubspot = async () => {
+    setIsConnectingHubspot(true);
+    try {
+      const result = await window.electronAPI.startHubSpotAuth();
+      if (result.success) {
+        const status = await window.electronAPI.getHubSpotAuthStatus();
+        setHubspotStatus(status);
+      }
+    } catch (error) {
+      console.error('HubSpot connection error:', error);
+    } finally {
+      setIsConnectingHubspot(false);
+    }
+  };
+
+  const handleDisconnectHubspot = async () => {
+    try {
+      await window.electronAPI.logoutHubSpot();
+      setHubspotStatus({ connected: false });
+    } catch (error) {
+      console.error('HubSpot disconnect error:', error);
+    }
+  };
 
   // Close profile dropdown on outside click
   useEffect(() => {
@@ -572,6 +614,48 @@ export function RightPanel() {
                   disabled={isIndexing || !workspacePath}
                 >
                   {!workspacePath ? 'Open a workspace first' : 'Index Workspace'}
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* HubSpot Integration Section */}
+          <div className={styles.settingsForm} style={{ marginTop: '16px' }}>
+            <label className={styles.label}>HubSpot CRM</label>
+            {hubspotStatus.connected ? (
+              <>
+                <div className={styles.hubspotConnected}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#00a4bd" strokeWidth="2" width="16" height="16">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                  </svg>
+                  <span>Connected</span>
+                </div>
+                {hubspotStatus.email && (
+                  <p className={styles.hubspotEmail}>{hubspotStatus.email}</p>
+                )}
+                {hubspotStatus.portalId && (
+                  <p className={styles.hint}>Portal ID: {hubspotStatus.portalId}</p>
+                )}
+                <button 
+                  className={styles.clearRagButton}
+                  onClick={handleDisconnectHubspot}
+                  style={{ marginTop: '8px' }}
+                >
+                  Disconnect
+                </button>
+              </>
+            ) : (
+              <>
+                <p className={styles.hint}>
+                  Connect HubSpot to query your deals and contacts via AI chat.
+                </p>
+                <button 
+                  className={styles.indexButton}
+                  onClick={handleConnectHubspot}
+                  disabled={isConnectingHubspot}
+                >
+                  {isConnectingHubspot ? 'Connecting...' : 'Connect HubSpot'}
                 </button>
               </>
             )}

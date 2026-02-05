@@ -18,6 +18,16 @@ import {
 import { processSchematicToolCall } from './schematic';
 import { createAndOpenEmailDraft, generateEmailBody, type EmailDraft } from './outlook';
 import { createOneDriveSharingLinks } from './onedrive';
+import {
+  getHubSpotAuthStatus,
+  getHubSpotDeals,
+  getHubSpotDeal,
+  searchHubSpotDeals,
+  getHubSpotContacts,
+  getHubSpotCompanies,
+  getHubSpotDealsSummary,
+  getHubSpotPipelines,
+} from './hubspot';
 
 // ============ Tool Definitions ============
 
@@ -243,6 +253,91 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  // HubSpot CRM Tools
+  {
+    type: 'function',
+    function: {
+      name: 'get_hubspot_deals',
+      description: 'Get deals from HubSpot CRM. Use this to see deals tracked in HubSpot. Returns deal name, amount, stage, and other properties.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'number',
+            description: 'Maximum number of deals to return. Default is 20.',
+          },
+          search_query: {
+            type: 'string',
+            description: 'Optional text to search for in deal names.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_hubspot_deal_details',
+      description: 'Get detailed information about a specific HubSpot deal, including associated contacts and companies.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The HubSpot deal ID.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_hubspot_pipeline_summary',
+      description: 'Get a summary of the HubSpot deal pipeline including total deals, total value, and breakdown by stage. Use this for pipeline analytics and reporting.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_hubspot_contacts',
+      description: 'Get contacts from HubSpot CRM. Returns contact names, emails, companies, and job titles.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'number',
+            description: 'Maximum number of contacts to return. Default is 20.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_hubspot_companies',
+      description: 'Get companies from HubSpot CRM. Returns company names, domains, industries, and other properties.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'number',
+            description: 'Maximum number of companies to return. Default is 20.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -405,6 +500,22 @@ export async function executeTool(
 
       case 'draft_email':
         return executeDraftEmail(args, context);
+
+      // HubSpot CRM Tools
+      case 'get_hubspot_deals':
+        return executeGetHubSpotDeals(args);
+
+      case 'get_hubspot_deal_details':
+        return executeGetHubSpotDealDetails(args.deal_id as string);
+
+      case 'get_hubspot_pipeline_summary':
+        return executeGetHubSpotPipelineSummary();
+
+      case 'get_hubspot_contacts':
+        return executeGetHubSpotContacts(args);
+
+      case 'get_hubspot_companies':
+        return executeGetHubSpotCompanies(args);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -910,4 +1021,239 @@ export function buildDealContext(currentDealId?: string): string {
     : '';
 
   return `${currentDealSection}Deal Pipeline (${deals.length} deals):\n${dealList}${recentActivitiesText}`;
+}
+
+// ============ HubSpot Tool Implementations ============
+
+async function executeGetHubSpotDeals(args: Record<string, unknown>): Promise<ToolResult> {
+  // Check if connected
+  const status = await getHubSpotAuthStatus();
+  if (!status.connected) {
+    return {
+      success: false,
+      error: 'Not connected to HubSpot. Please connect HubSpot in Settings first.',
+    };
+  }
+
+  const limit = (args.limit as number) || 20;
+  const searchQuery = args.search_query as string | undefined;
+
+  try {
+    let dealsResponse;
+
+    if (searchQuery) {
+      // Use search API if query provided
+      dealsResponse = await searchHubSpotDeals({
+        query: searchQuery,
+        limit,
+      });
+    } else {
+      // Otherwise get all deals
+      dealsResponse = await getHubSpotDeals({ limit });
+    }
+
+    const deals = dealsResponse.results.map(deal => ({
+      id: deal.id,
+      name: deal.properties.dealname || 'Unnamed Deal',
+      amount: deal.properties.amount ? `$${parseFloat(deal.properties.amount).toLocaleString()}` : 'N/A',
+      stage: deal.properties.dealstage || 'Unknown',
+      pipeline: deal.properties.pipeline || 'Default',
+      closeDate: deal.properties.closedate || 'N/A',
+      createdAt: deal.properties.createdate 
+        ? new Date(deal.properties.createdate).toLocaleDateString() 
+        : 'N/A',
+    }));
+
+    return {
+      success: true,
+      data: deals,
+      message: `Found ${deals.length} HubSpot deal${deals.length !== 1 ? 's' : ''}.`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get HubSpot deals',
+    };
+  }
+}
+
+async function executeGetHubSpotDealDetails(dealId: string): Promise<ToolResult> {
+  if (!dealId) {
+    return { success: false, error: 'Deal ID is required' };
+  }
+
+  const status = await getHubSpotAuthStatus();
+  if (!status.connected) {
+    return {
+      success: false,
+      error: 'Not connected to HubSpot. Please connect HubSpot in Settings first.',
+    };
+  }
+
+  try {
+    const deal = await getHubSpotDeal(dealId);
+
+    const dealDetails = {
+      id: deal.id,
+      name: deal.properties.dealname || 'Unnamed Deal',
+      amount: deal.properties.amount ? `$${parseFloat(deal.properties.amount).toLocaleString()}` : 'N/A',
+      stage: deal.properties.dealstage || 'Unknown',
+      pipeline: deal.properties.pipeline || 'Default',
+      closeDate: deal.properties.closedate || 'N/A',
+      createdAt: deal.properties.createdate 
+        ? new Date(deal.properties.createdate).toLocaleDateString() 
+        : 'N/A',
+      lastModified: deal.properties.hs_lastmodifieddate 
+        ? new Date(deal.properties.hs_lastmodifieddate).toLocaleDateString() 
+        : 'N/A',
+      description: deal.properties.description || 'No description',
+      ownerId: deal.properties.hubspot_owner_id || 'Unassigned',
+      associatedContacts: deal.associations?.contacts?.results?.length || 0,
+      associatedCompanies: deal.associations?.companies?.results?.length || 0,
+    };
+
+    return {
+      success: true,
+      data: dealDetails,
+      message: `Retrieved details for "${dealDetails.name}".`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get HubSpot deal details',
+    };
+  }
+}
+
+async function executeGetHubSpotPipelineSummary(): Promise<ToolResult> {
+  const status = await getHubSpotAuthStatus();
+  if (!status.connected) {
+    return {
+      success: false,
+      error: 'Not connected to HubSpot. Please connect HubSpot in Settings first.',
+    };
+  }
+
+  try {
+    // Get both summary and pipeline definitions for stage names
+    const [summary, pipelinesResponse] = await Promise.all([
+      getHubSpotDealsSummary(),
+      getHubSpotPipelines(),
+    ]);
+
+    // Build stage name lookup
+    const stageNames: Record<string, string> = {};
+    for (const pipeline of pipelinesResponse.results) {
+      for (const stage of pipeline.stages) {
+        stageNames[stage.id] = stage.label;
+      }
+    }
+
+    // Format stage breakdown with names
+    const stageBreakdown = Object.entries(summary.dealsByStage).map(([stageId, data]) => ({
+      stage: stageNames[stageId] || stageId,
+      count: data.count,
+      value: `$${data.value.toLocaleString()}`,
+    }));
+
+    const pipelineSummary = {
+      totalDeals: summary.totalDeals,
+      totalValue: `$${summary.totalValue.toLocaleString()}`,
+      stageBreakdown,
+      recentDeals: summary.recentDeals.slice(0, 5).map(deal => ({
+        id: deal.id,
+        name: deal.properties.dealname || 'Unnamed',
+        amount: deal.properties.amount ? `$${parseFloat(deal.properties.amount).toLocaleString()}` : 'N/A',
+        stage: stageNames[deal.properties.dealstage || ''] || deal.properties.dealstage || 'Unknown',
+      })),
+    };
+
+    return {
+      success: true,
+      data: pipelineSummary,
+      message: `HubSpot Pipeline: ${summary.totalDeals} deals totaling $${summary.totalValue.toLocaleString()}.`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get HubSpot pipeline summary',
+    };
+  }
+}
+
+async function executeGetHubSpotContacts(args: Record<string, unknown>): Promise<ToolResult> {
+  const status = await getHubSpotAuthStatus();
+  if (!status.connected) {
+    return {
+      success: false,
+      error: 'Not connected to HubSpot. Please connect HubSpot in Settings first.',
+    };
+  }
+
+  const limit = (args.limit as number) || 20;
+
+  try {
+    const contactsResponse = await getHubSpotContacts({ limit });
+
+    const contacts = contactsResponse.results.map(contact => ({
+      id: contact.id,
+      name: `${contact.properties.firstname || ''} ${contact.properties.lastname || ''}`.trim() || 'Unknown',
+      email: contact.properties.email || 'N/A',
+      phone: contact.properties.phone || 'N/A',
+      company: contact.properties.company || 'N/A',
+      jobTitle: contact.properties.jobtitle || 'N/A',
+    }));
+
+    return {
+      success: true,
+      data: contacts,
+      message: `Found ${contacts.length} HubSpot contact${contacts.length !== 1 ? 's' : ''}.`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get HubSpot contacts',
+    };
+  }
+}
+
+async function executeGetHubSpotCompanies(args: Record<string, unknown>): Promise<ToolResult> {
+  const status = await getHubSpotAuthStatus();
+  if (!status.connected) {
+    return {
+      success: false,
+      error: 'Not connected to HubSpot. Please connect HubSpot in Settings first.',
+    };
+  }
+
+  const limit = (args.limit as number) || 20;
+
+  try {
+    const companiesResponse = await getHubSpotCompanies({ limit });
+
+    const companies = companiesResponse.results.map(company => ({
+      id: company.id,
+      name: company.properties.name || 'Unknown',
+      domain: company.properties.domain || 'N/A',
+      industry: company.properties.industry || 'N/A',
+      city: company.properties.city || 'N/A',
+      state: company.properties.state || '',
+      country: company.properties.country || 'N/A',
+      employees: company.properties.numberofemployees || 'N/A',
+      revenue: company.properties.annualrevenue 
+        ? `$${parseFloat(company.properties.annualrevenue).toLocaleString()}` 
+        : 'N/A',
+    }));
+
+    return {
+      success: true,
+      data: companies,
+      message: `Found ${companies.length} HubSpot compan${companies.length !== 1 ? 'ies' : 'y'}.`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get HubSpot companies',
+    };
+  }
 }

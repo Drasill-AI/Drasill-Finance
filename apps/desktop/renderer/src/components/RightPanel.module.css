@@ -828,6 +828,26 @@
   margin-top: 10px;
 }
 
+/* HubSpot Integration Styles */
+.hubspotConnected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #00a4bd;
+  padding: 10px 14px;
+  background-color: rgba(0, 164, 189, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(0, 164, 189, 0.2);
+}
+
+.hubspotEmail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
 /* Source Context Menu */
 .sourceContextMenu {
   position: fixed;

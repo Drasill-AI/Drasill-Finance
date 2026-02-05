@@ -661,6 +661,182 @@ const api = {
   },
 
   // ==========================================
+  // HubSpot CRM API
+  // ==========================================
+
+  /**
+   * Start HubSpot OAuth authentication
+   */
+  startHubSpotAuth: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_AUTH_START);
+  },
+
+  /**
+   * Get HubSpot authentication status
+   */
+  getHubSpotAuthStatus: (): Promise<{ connected: boolean; email?: string; portalId?: string }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_AUTH_STATUS);
+  },
+
+  /**
+   * Logout from HubSpot
+   */
+  logoutHubSpot: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_LOGOUT);
+  },
+
+  /**
+   * Get HubSpot deals
+   */
+  getHubSpotDeals: (options?: { limit?: number; after?: string; properties?: string[] }): Promise<{
+    results: Array<{
+      id: string;
+      properties: Record<string, string | undefined>;
+      associations?: {
+        contacts?: { results: Array<{ id: string }> };
+        companies?: { results: Array<{ id: string }> };
+      };
+    }>;
+    paging?: { next?: { after: string; link: string } };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_DEALS, options);
+  },
+
+  /**
+   * Get single HubSpot deal
+   */
+  getHubSpotDeal: (dealId: string, properties?: string[]): Promise<{
+    id: string;
+    properties: Record<string, string | undefined>;
+    associations?: {
+      contacts?: { results: Array<{ id: string }> };
+      companies?: { results: Array<{ id: string }> };
+    };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_DEAL, dealId, properties);
+  },
+
+  /**
+   * Search HubSpot deals
+   */
+  searchHubSpotDeals: (query: {
+    filterGroups?: Array<{
+      filters: Array<{
+        propertyName: string;
+        operator: string;
+        value: string;
+      }>;
+    }>;
+    query?: string;
+    limit?: number;
+    properties?: string[];
+  }): Promise<{
+    results: Array<{
+      id: string;
+      properties: Record<string, string | undefined>;
+    }>;
+    paging?: { next?: { after: string; link: string } };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_SEARCH_DEALS, query);
+  },
+
+  /**
+   * Get HubSpot contacts
+   */
+  getHubSpotContacts: (options?: { limit?: number; after?: string; properties?: string[] }): Promise<{
+    results: Array<{
+      id: string;
+      properties: Record<string, string | undefined>;
+    }>;
+    paging?: { next?: { after: string; link: string } };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_CONTACTS, options);
+  },
+
+  /**
+   * Get single HubSpot contact
+   */
+  getHubSpotContact: (contactId: string, properties?: string[]): Promise<{
+    id: string;
+    properties: Record<string, string | undefined>;
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_CONTACT, contactId, properties);
+  },
+
+  /**
+   * Get HubSpot companies
+   */
+  getHubSpotCompanies: (options?: { limit?: number; after?: string; properties?: string[] }): Promise<{
+    results: Array<{
+      id: string;
+      properties: Record<string, string | undefined>;
+    }>;
+    paging?: { next?: { after: string; link: string } };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_COMPANIES, options);
+  },
+
+  /**
+   * Get single HubSpot company
+   */
+  getHubSpotCompany: (companyId: string, properties?: string[]): Promise<{
+    id: string;
+    properties: Record<string, string | undefined>;
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_COMPANY, companyId, properties);
+  },
+
+  /**
+   * Get HubSpot owners
+   */
+  getHubSpotOwners: (options?: { limit?: number; after?: string }): Promise<{
+    results: Array<{
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      userId: number;
+    }>;
+    paging?: { next?: { after: string; link: string } };
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_OWNERS, options);
+  },
+
+  /**
+   * Get HubSpot deal pipelines
+   */
+  getHubSpotPipelines: (): Promise<{
+    results: Array<{
+      id: string;
+      label: string;
+      displayOrder: number;
+      stages: Array<{
+        id: string;
+        label: string;
+        displayOrder: number;
+        metadata: { probability?: string };
+      }>;
+    }>;
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_PIPELINES);
+  },
+
+  /**
+   * Get HubSpot deals summary for AI
+   */
+  getHubSpotDealsSummary: (): Promise<{
+    totalDeals: number;
+    totalValue: number;
+    dealsByStage: Record<string, { count: number; value: number }>;
+    recentDeals: Array<{
+      id: string;
+      properties: Record<string, string | undefined>;
+    }>;
+  }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HUBSPOT_GET_DEALS_SUMMARY);
+  },
+
+  // ==========================================
   // Chat History API
   // ==========================================
 

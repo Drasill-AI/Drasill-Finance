@@ -42,6 +42,30 @@ import {
   getOneDriveFolderInfo,
 } from './onedrive';
 import {
+  startHubSpotAuth,
+  getHubSpotAuthStatus,
+  logoutHubSpot,
+  getHubSpotDeals,
+  getHubSpotDeal,
+  searchHubSpotDeals,
+  getHubSpotContacts,
+  getHubSpotContact,
+  getHubSpotCompanies,
+  getHubSpotCompany,
+  getHubSpotOwners,
+  getHubSpotPipelines,
+  getHubSpotDealsSummary,
+  type HubSpotAuthStatus,
+  type HubSpotDeal,
+  type HubSpotDealsResponse,
+  type HubSpotContact,
+  type HubSpotContactsResponse,
+  type HubSpotCompany,
+  type HubSpotCompaniesResponse,
+  type HubSpotOwnersResponse,
+  type HubSpotPipelinesResponse,
+} from './hubspot';
+import {
   createEmailDraft,
   sendEmailDraft,
   sendEmailDirect,
@@ -1271,6 +1295,171 @@ export function setupIpcHandlers(): void {
     } catch (error) {
       console.error('[IPC] Get email drafts error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // ==========================================
+  // HubSpot CRM Integration
+  // ==========================================
+
+  // Start HubSpot OAuth flow
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_AUTH_START, async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      console.log('[IPC] Starting HubSpot authentication...');
+      const result = await startHubSpotAuth();
+      console.log('[IPC] HubSpot auth result:', result.success);
+      return result;
+    } catch (error) {
+      console.error('[IPC] HubSpot auth error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Get HubSpot authentication status
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_AUTH_STATUS, async (): Promise<HubSpotAuthStatus> => {
+    try {
+      return await getHubSpotAuthStatus();
+    } catch (error) {
+      console.error('[IPC] HubSpot status error:', error);
+      return { connected: false };
+    }
+  });
+
+  // Logout from HubSpot
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_LOGOUT, async (): Promise<boolean> => {
+    try {
+      console.log('[IPC] Logging out from HubSpot...');
+      await logoutHubSpot();
+      return true;
+    } catch (error) {
+      console.error('[IPC] HubSpot logout error:', error);
+      return false;
+    }
+  });
+
+  // Get HubSpot deals
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_DEALS, async (_event, options?: { limit?: number; after?: string; properties?: string[] }): Promise<HubSpotDealsResponse> => {
+    try {
+      console.log('[IPC] Getting HubSpot deals');
+      return await getHubSpotDeals(options);
+    } catch (error) {
+      console.error('[IPC] HubSpot get deals error:', error);
+      throw error;
+    }
+  });
+
+  // Get single HubSpot deal
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_DEAL, async (_event, dealId: string, properties?: string[]): Promise<HubSpotDeal> => {
+    try {
+      console.log('[IPC] Getting HubSpot deal:', dealId);
+      return await getHubSpotDeal(dealId, properties);
+    } catch (error) {
+      console.error('[IPC] HubSpot get deal error:', error);
+      throw error;
+    }
+  });
+
+  // Search HubSpot deals
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_SEARCH_DEALS, async (_event, query: {
+    filterGroups?: Array<{
+      filters: Array<{
+        propertyName: string;
+        operator: string;
+        value: string;
+      }>;
+    }>;
+    query?: string;
+    limit?: number;
+    properties?: string[];
+  }): Promise<HubSpotDealsResponse> => {
+    try {
+      console.log('[IPC] Searching HubSpot deals:', query);
+      return await searchHubSpotDeals(query);
+    } catch (error) {
+      console.error('[IPC] HubSpot search deals error:', error);
+      throw error;
+    }
+  });
+
+  // Get HubSpot contacts
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_CONTACTS, async (_event, options?: { limit?: number; after?: string; properties?: string[] }): Promise<HubSpotContactsResponse> => {
+    try {
+      console.log('[IPC] Getting HubSpot contacts');
+      return await getHubSpotContacts(options);
+    } catch (error) {
+      console.error('[IPC] HubSpot get contacts error:', error);
+      throw error;
+    }
+  });
+
+  // Get single HubSpot contact
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_CONTACT, async (_event, contactId: string, properties?: string[]): Promise<HubSpotContact> => {
+    try {
+      console.log('[IPC] Getting HubSpot contact:', contactId);
+      return await getHubSpotContact(contactId, properties);
+    } catch (error) {
+      console.error('[IPC] HubSpot get contact error:', error);
+      throw error;
+    }
+  });
+
+  // Get HubSpot companies
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_COMPANIES, async (_event, options?: { limit?: number; after?: string; properties?: string[] }): Promise<HubSpotCompaniesResponse> => {
+    try {
+      console.log('[IPC] Getting HubSpot companies');
+      return await getHubSpotCompanies(options);
+    } catch (error) {
+      console.error('[IPC] HubSpot get companies error:', error);
+      throw error;
+    }
+  });
+
+  // Get single HubSpot company
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_COMPANY, async (_event, companyId: string, properties?: string[]): Promise<HubSpotCompany> => {
+    try {
+      console.log('[IPC] Getting HubSpot company:', companyId);
+      return await getHubSpotCompany(companyId, properties);
+    } catch (error) {
+      console.error('[IPC] HubSpot get company error:', error);
+      throw error;
+    }
+  });
+
+  // Get HubSpot owners
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_OWNERS, async (_event, options?: { limit?: number; after?: string }): Promise<HubSpotOwnersResponse> => {
+    try {
+      console.log('[IPC] Getting HubSpot owners');
+      return await getHubSpotOwners(options);
+    } catch (error) {
+      console.error('[IPC] HubSpot get owners error:', error);
+      throw error;
+    }
+  });
+
+  // Get HubSpot pipelines
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_PIPELINES, async (): Promise<HubSpotPipelinesResponse> => {
+    try {
+      console.log('[IPC] Getting HubSpot pipelines');
+      return await getHubSpotPipelines();
+    } catch (error) {
+      console.error('[IPC] HubSpot get pipelines error:', error);
+      throw error;
+    }
+  });
+
+  // Get HubSpot deals summary for AI
+  ipcMain.handle(IPC_CHANNELS.HUBSPOT_GET_DEALS_SUMMARY, async (): Promise<{
+    totalDeals: number;
+    totalValue: number;
+    dealsByStage: Record<string, { count: number; value: number }>;
+    recentDeals: HubSpotDeal[];
+  }> => {
+    try {
+      console.log('[IPC] Getting HubSpot deals summary');
+      return await getHubSpotDealsSummary();
+    } catch (error) {
+      console.error('[IPC] HubSpot get deals summary error:', error);
+      throw error;
     }
   });
 
