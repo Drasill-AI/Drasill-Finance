@@ -295,6 +295,60 @@ function initializeSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_templates_type ON document_templates(template_type);
     CREATE INDEX IF NOT EXISTS idx_memos_deal ON generated_memos(deal_id);
     CREATE INDEX IF NOT EXISTS idx_memos_template ON generated_memos(template_id);
+
+    -- Bank accounts table
+    CREATE TABLE IF NOT EXISTS bank_accounts (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT,
+      institution TEXT NOT NULL,
+      account_name TEXT,
+      account_number_last4 TEXT,
+      account_type TEXT DEFAULT 'checking' CHECK(account_type IN ('checking', 'savings', 'money_market', 'other')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE SET NULL
+    );
+
+    -- Bank statements table
+    CREATE TABLE IF NOT EXISTS bank_statements (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      opening_balance REAL,
+      closing_balance REAL,
+      total_deposits REAL,
+      total_withdrawals REAL,
+      source_page_count INTEGER,
+      import_status TEXT DEFAULT 'parsed' CHECK(import_status IN ('parsed', 'verified', 'rejected')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (account_id) REFERENCES bank_accounts(id) ON DELETE CASCADE
+    );
+
+    -- Transactions table
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      statement_id TEXT NOT NULL,
+      transaction_date TEXT NOT NULL,
+      post_date TEXT,
+      description TEXT NOT NULL,
+      debit REAL DEFAULT 0,
+      credit REAL DEFAULT 0,
+      running_balance REAL,
+      category TEXT,
+      source_page INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (statement_id) REFERENCES bank_statements(id) ON DELETE CASCADE
+    );
+
+    -- Financial data indexes
+    CREATE INDEX IF NOT EXISTS idx_bank_accounts_deal ON bank_accounts(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_bank_statements_account ON bank_statements(account_id);
+    CREATE INDEX IF NOT EXISTS idx_bank_statements_period ON bank_statements(period_start, period_end);
+    CREATE INDEX IF NOT EXISTS idx_transactions_statement ON transactions(statement_id);
+    CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
+    CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
   `);
 }
 
@@ -1778,5 +1832,572 @@ function mapRowToGeneratedMemo(row: any): GeneratedMemo {
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+// =============================================================================
+// BANK ACCOUNT OPERATIONS
+// =============================================================================
+
+export interface BankAccount {
+  id: string;
+  dealId?: string;
+  institution: string;
+  accountName?: string;
+  accountNumberLast4?: string;
+  accountType: 'checking' | 'savings' | 'money_market' | 'other';
+  createdAt?: string;
+}
+
+export interface BankStatement {
+  id: string;
+  accountId: string;
+  filePath: string;
+  fileName: string;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance?: number;
+  closingBalance?: number;
+  totalDeposits?: number;
+  totalWithdrawals?: number;
+  sourcePageCount?: number;
+  importStatus: 'parsed' | 'verified' | 'rejected';
+  createdAt?: string;
+}
+
+export interface BankTransaction {
+  id: string;
+  statementId: string;
+  transactionDate: string;
+  postDate?: string;
+  description: string;
+  debit: number;
+  credit: number;
+  runningBalance?: number;
+  category?: string;
+  sourcePage?: number;
+  createdAt?: string;
+}
+
+/**
+ * Create a bank account
+ */
+export function createBankAccount(data: Partial<BankAccount>): BankAccount {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  
+  db.prepare(`
+    INSERT INTO bank_accounts (id, deal_id, institution, account_name, account_number_last4, account_type)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.dealId || null,
+    data.institution || 'Unknown',
+    data.accountName || null,
+    data.accountNumberLast4 || null,
+    data.accountType || 'checking'
+  );
+  
+  return getBankAccount(id)!;
+}
+
+/**
+ * Get a bank account by ID
+ */
+export function getBankAccount(id: string): BankAccount | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  
+  return {
+    id: row.id,
+    dealId: row.deal_id,
+    institution: row.institution,
+    accountName: row.account_name,
+    accountNumberLast4: row.account_number_last4,
+    accountType: row.account_type,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Get all bank accounts for a deal
+ */
+export function getBankAccountsByDeal(dealId: string): BankAccount[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM bank_accounts WHERE deal_id = ? ORDER BY institution ASC').all(dealId) as any[];
+  return rows.map(row => ({
+    id: row.id,
+    dealId: row.deal_id,
+    institution: row.institution,
+    accountName: row.account_name,
+    accountNumberLast4: row.account_number_last4,
+    accountType: row.account_type,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
+ * Get all bank accounts
+ */
+export function getAllBankAccounts(): BankAccount[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM bank_accounts ORDER BY institution ASC').all() as any[];
+  return rows.map(row => ({
+    id: row.id,
+    dealId: row.deal_id,
+    institution: row.institution,
+    accountName: row.account_name,
+    accountNumberLast4: row.account_number_last4,
+    accountType: row.account_type,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
+ * Delete a bank account and all associated statements/transactions
+ */
+export function deleteBankAccount(id: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM bank_accounts WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// =============================================================================
+// BANK STATEMENT OPERATIONS
+// =============================================================================
+
+/**
+ * Create a bank statement
+ */
+export function createBankStatement(data: Partial<BankStatement>): BankStatement {
+  if (!db) throw new Error('Database not initialized');
+  
+  const id = generateId();
+  
+  db.prepare(`
+    INSERT INTO bank_statements (id, account_id, file_path, file_name, period_start, period_end, opening_balance, closing_balance, total_deposits, total_withdrawals, source_page_count, import_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.accountId,
+    data.filePath || '',
+    data.fileName || '',
+    data.periodStart || '',
+    data.periodEnd || '',
+    data.openingBalance ?? null,
+    data.closingBalance ?? null,
+    data.totalDeposits ?? null,
+    data.totalWithdrawals ?? null,
+    data.sourcePageCount ?? null,
+    data.importStatus || 'parsed'
+  );
+  
+  return getBankStatement(id)!;
+}
+
+/**
+ * Get a bank statement by ID
+ */
+export function getBankStatement(id: string): BankStatement | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare('SELECT * FROM bank_statements WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  
+  return mapRowToBankStatement(row);
+}
+
+/**
+ * Get all statements for an account
+ */
+export function getStatementsByAccount(accountId: string): BankStatement[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM bank_statements WHERE account_id = ? ORDER BY period_start DESC').all(accountId) as any[];
+  return rows.map(mapRowToBankStatement);
+}
+
+/**
+ * Get all statements across all accounts for a deal
+ */
+export function getStatementsByDeal(dealId: string): BankStatement[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT bs.* FROM bank_statements bs
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+    ORDER BY bs.period_start DESC
+  `).all(dealId) as any[];
+  return rows.map(mapRowToBankStatement);
+}
+
+/**
+ * Update statement import status
+ */
+export function updateBankStatementStatus(id: string, status: 'parsed' | 'verified' | 'rejected'): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('UPDATE bank_statements SET import_status = ? WHERE id = ?').run(status, id);
+  return result.changes > 0;
+}
+
+/**
+ * Delete a bank statement and its transactions
+ */
+export function deleteBankStatement(id: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+  
+  const result = db.prepare('DELETE FROM bank_statements WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+function mapRowToBankStatement(row: any): BankStatement {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    filePath: row.file_path,
+    fileName: row.file_name,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    openingBalance: row.opening_balance,
+    closingBalance: row.closing_balance,
+    totalDeposits: row.total_deposits,
+    totalWithdrawals: row.total_withdrawals,
+    sourcePageCount: row.source_page_count,
+    importStatus: row.import_status,
+    createdAt: row.created_at,
+  };
+}
+
+// =============================================================================
+// TRANSACTION OPERATIONS
+// =============================================================================
+
+/**
+ * Bulk insert transactions for a statement (within a transaction for speed)
+ */
+export function bulkInsertTransactions(statementId: string, transactions: Partial<BankTransaction>[]): number {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stmt = db.prepare(`
+    INSERT INTO transactions (id, statement_id, transaction_date, post_date, description, debit, credit, running_balance, category, source_page)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  let count = 0;
+  const insert = db.transaction(() => {
+    for (const txn of transactions) {
+      const id = generateId();
+      stmt.run(
+        id,
+        statementId,
+        txn.transactionDate || '',
+        txn.postDate || null,
+        txn.description || '',
+        txn.debit || 0,
+        txn.credit || 0,
+        txn.runningBalance ?? null,
+        txn.category || null,
+        txn.sourcePage ?? null
+      );
+      count++;
+    }
+  });
+  
+  insert();
+  return count;
+}
+
+/**
+ * Get transactions for a statement
+ */
+export function getTransactionsByStatement(statementId: string): BankTransaction[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare('SELECT * FROM transactions WHERE statement_id = ? ORDER BY transaction_date ASC').all(statementId) as any[];
+  return rows.map(mapRowToTransaction);
+}
+
+/**
+ * Get transactions for a deal within a date range
+ */
+export function getTransactionsByDealAndDateRange(dealId: string, startDate: string, endDate: string): BankTransaction[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT t.* FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+    ORDER BY t.transaction_date ASC
+  `).all(dealId, startDate, endDate) as any[];
+  return rows.map(mapRowToTransaction);
+}
+
+/**
+ * Get transactions for an account within a date range
+ */
+export function getTransactionsByAccountAndDateRange(accountId: string, startDate: string, endDate: string): BankTransaction[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT t.* FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    WHERE bs.account_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+    ORDER BY t.transaction_date ASC
+  `).all(accountId, startDate, endDate) as any[];
+  return rows.map(mapRowToTransaction);
+}
+
+/**
+ * Search transactions by description keyword
+ */
+export function searchTransactions(dealId: string, keyword: string, limit = 50): BankTransaction[] {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT t.* FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.description LIKE ?
+    ORDER BY t.transaction_date DESC
+    LIMIT ?
+  `).all(dealId, `%${keyword}%`, limit) as any[];
+  return rows.map(mapRowToTransaction);
+}
+
+/**
+ * Get monthly balance summary for a deal
+ */
+export function getMonthlyBalanceSummary(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  avgBalance: number;
+  minBalance: number;
+  maxBalance: number;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  transactionCount: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.transaction_date) as month,
+      AVG(t.running_balance) as avg_balance,
+      MIN(t.running_balance) as min_balance,
+      MAX(t.running_balance) as max_balance,
+      SUM(t.credit) as total_deposits,
+      SUM(t.debit) as total_withdrawals,
+      COUNT(*) as txn_count
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+      AND t.running_balance IS NOT NULL
+    GROUP BY strftime('%Y-%m', t.transaction_date)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(row => ({
+    month: row.month,
+    avgBalance: row.avg_balance || 0,
+    minBalance: row.min_balance || 0,
+    maxBalance: row.max_balance || 0,
+    totalDeposits: row.total_deposits || 0,
+    totalWithdrawals: row.total_withdrawals || 0,
+    transactionCount: row.txn_count || 0,
+  }));
+}
+
+/**
+ * Get cashflow by period (monthly or quarterly) for a deal
+ */
+export function getCashflowByPeriod(dealId: string, startDate: string, endDate: string, periodType: 'month' | 'quarter' = 'month'): Array<{
+  period: string;
+  inflows: number;
+  outflows: number;
+  netCashflow: number;
+  transactionCount: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const groupExpr = periodType === 'quarter'
+    ? "strftime('%Y', t.transaction_date) || '-Q' || ((CAST(strftime('%m', t.transaction_date) AS INTEGER) - 1) / 3 + 1)"
+    : "strftime('%Y-%m', t.transaction_date)";
+  
+  const rows = db.prepare(`
+    SELECT
+      ${groupExpr} as period,
+      SUM(t.credit) as inflows,
+      SUM(t.debit) as outflows,
+      SUM(t.credit) - SUM(t.debit) as net_cashflow,
+      COUNT(*) as txn_count
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+    GROUP BY ${groupExpr}
+    ORDER BY period ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(row => ({
+    period: row.period,
+    inflows: row.inflows || 0,
+    outflows: row.outflows || 0,
+    netCashflow: row.net_cashflow || 0,
+    transactionCount: row.txn_count || 0,
+  }));
+}
+
+/**
+ * Detect seasonality by comparing same months across years
+ * Returns month-level analysis showing which months consistently have lower/higher cashflow
+ */
+export function detectSeasonality(dealId: string, startDate: string, endDate: string): {
+  monthlyPattern: Array<{
+    monthNumber: number;
+    monthName: string;
+    avgNetCashflow: number;
+    avgInflows: number;
+    avgOutflows: number;
+    yearsOfData: number;
+    deviationFromAvg: number;
+    isLow: boolean;
+    isHigh: boolean;
+  }>;
+  overallAvgMonthlyNet: number;
+  seasonalityStrength: 'none' | 'weak' | 'moderate' | 'strong';
+  lowMonths: string[];
+  highMonths: string[];
+  sourceInfo: { statementCount: number; dateRange: string };
+} {
+  if (!db) throw new Error('Database not initialized');
+  
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  const rows = db.prepare(`
+    SELECT
+      CAST(strftime('%m', t.transaction_date) AS INTEGER) as month_num,
+      strftime('%Y', t.transaction_date) as year,
+      SUM(t.credit) as inflows,
+      SUM(t.debit) as outflows,
+      SUM(t.credit) - SUM(t.debit) as net_cashflow
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+    GROUP BY CAST(strftime('%m', t.transaction_date) AS INTEGER), strftime('%Y', t.transaction_date)
+    ORDER BY month_num, year
+  `).all(dealId, startDate, endDate) as any[];
+  
+  // Aggregate by month across years
+  const monthData: Map<number, { nets: number[]; inflows: number[]; outflows: number[] }> = new Map();
+  for (const row of rows) {
+    if (!monthData.has(row.month_num)) {
+      monthData.set(row.month_num, { nets: [], inflows: [], outflows: [] });
+    }
+    const md = monthData.get(row.month_num)!;
+    md.nets.push(row.net_cashflow || 0);
+    md.inflows.push(row.inflows || 0);
+    md.outflows.push(row.outflows || 0);
+  }
+  
+  // Calculate overall average
+  const allNets = rows.map(r => r.net_cashflow || 0);
+  const overallAvg = allNets.length > 0 ? allNets.reduce((a: number, b: number) => a + b, 0) / allNets.length : 0;
+  
+  // Build monthly pattern
+  const monthlyPattern = [];
+  const lowMonths: string[] = [];
+  const highMonths: string[] = [];
+  const deviations: number[] = [];
+  
+  for (let m = 1; m <= 12; m++) {
+    const md = monthData.get(m);
+    if (!md || md.nets.length === 0) continue;
+    
+    const avgNet = md.nets.reduce((a, b) => a + b, 0) / md.nets.length;
+    const avgIn = md.inflows.reduce((a, b) => a + b, 0) / md.inflows.length;
+    const avgOut = md.outflows.reduce((a, b) => a + b, 0) / md.outflows.length;
+    const deviation = overallAvg !== 0 ? ((avgNet - overallAvg) / Math.abs(overallAvg)) * 100 : 0;
+    const isLow = deviation < -20;
+    const isHigh = deviation > 20;
+    
+    if (isLow) lowMonths.push(monthNames[m - 1]);
+    if (isHigh) highMonths.push(monthNames[m - 1]);
+    deviations.push(Math.abs(deviation));
+    
+    monthlyPattern.push({
+      monthNumber: m,
+      monthName: monthNames[m - 1],
+      avgNetCashflow: Math.round(avgNet * 100) / 100,
+      avgInflows: Math.round(avgIn * 100) / 100,
+      avgOutflows: Math.round(avgOut * 100) / 100,
+      yearsOfData: md.nets.length,
+      deviationFromAvg: Math.round(deviation * 10) / 10,
+      isLow,
+      isHigh,
+    });
+  }
+  
+  // Determine seasonality strength
+  const avgDeviation = deviations.length > 0 ? deviations.reduce((a, b) => a + b, 0) / deviations.length : 0;
+  let seasonalityStrength: 'none' | 'weak' | 'moderate' | 'strong' = 'none';
+  if (avgDeviation > 40) seasonalityStrength = 'strong';
+  else if (avgDeviation > 20) seasonalityStrength = 'moderate';
+  else if (avgDeviation > 10) seasonalityStrength = 'weak';
+  
+  // Get statement count for source info
+  const stmtCount = db.prepare(`
+    SELECT COUNT(*) as cnt FROM bank_statements bs
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ? AND bs.import_status != 'rejected'
+  `).get(dealId) as any;
+  
+  return {
+    monthlyPattern,
+    overallAvgMonthlyNet: Math.round(overallAvg * 100) / 100,
+    seasonalityStrength,
+    lowMonths,
+    highMonths,
+    sourceInfo: {
+      statementCount: stmtCount?.cnt || 0,
+      dateRange: `${startDate} to ${endDate}`,
+    },
+  };
+}
+
+function mapRowToTransaction(row: any): BankTransaction {
+  return {
+    id: row.id,
+    statementId: row.statement_id,
+    transactionDate: row.transaction_date,
+    postDate: row.post_date,
+    description: row.description,
+    debit: row.debit || 0,
+    credit: row.credit || 0,
+    runningBalance: row.running_balance,
+    category: row.category,
+    sourcePage: row.source_page,
+    createdAt: row.created_at,
   };
 }

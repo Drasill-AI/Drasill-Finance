@@ -7,6 +7,7 @@ import { TopBar } from './TopBar';
 import { BottomPanel } from './BottomPanel';
 import { DealModal } from './DealModal';
 import { ActivityModal } from './ActivityModal';
+import { BankStatementImport } from './BankStatementImport';
 import { useAppStore } from '../store';
 import styles from './Layout.module.css';
 
@@ -29,6 +30,10 @@ export function Layout() {
     toggleCommandPalette,
     splitViewEnabled,
     toggleSplitView,
+    isBankStatementImportOpen,
+    bankStatementDealId,
+    bankStatementDealName,
+    closeBankStatementImport,
   } = useAppStore();
 
   // Global keyboard shortcuts
@@ -273,6 +278,13 @@ export function Layout() {
       {/* Modals */}
       <DealModal />
       <ActivityModal />
+      {isBankStatementImportOpen && bankStatementDealId && (
+        <BankStatementImport 
+          dealId={bankStatementDealId}
+          dealName={bankStatementDealName || 'Deal'}
+          onClose={closeBankStatementImport}
+        />
+      )}
     </div>
   );
 }

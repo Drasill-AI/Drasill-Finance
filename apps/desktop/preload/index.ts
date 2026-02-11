@@ -837,6 +837,31 @@ const api = {
   },
 
   // ==========================================
+  // Cohere API Key Management
+  // ==========================================
+
+  /**
+   * Set Cohere API key for reranking
+   */
+  setCohereApiKey: (apiKey: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COHERE_SET_API_KEY, apiKey);
+  },
+
+  /**
+   * Get masked Cohere API key
+   */
+  getCohereApiKey: (): Promise<string | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COHERE_GET_API_KEY);
+  },
+
+  /**
+   * Delete Cohere API key
+   */
+  deleteCohereApiKey: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COHERE_DELETE_API_KEY);
+  },
+
+  // ==========================================
   // Chat History API
   // ==========================================
 
@@ -1044,6 +1069,47 @@ const api = {
   // File selection dialog
   selectFiles: (options: { title?: string; filters?: any[]; properties?: string[] }): Promise<string[] | null> => {
     return ipcRenderer.invoke(IPC_CHANNELS.SELECT_FILES, options);
+  },
+
+  // Bank Statement Analysis
+  bankSelectFile: (): Promise<{ filePath: string; fileName: string; fileType: string } | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_SELECT_FILE);
+  },
+
+  bankParseCSV: (filePath: string): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_PARSE_CSV, filePath);
+  },
+
+  bankParsePDF: (extractedText: string, fileName: string): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_PARSE_PDF, extractedText, fileName);
+  },
+
+  bankImportStatement: (dealId: string, filePath: string, fileName: string, parsedData: any): Promise<any> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_IMPORT_STATEMENT, dealId, filePath, fileName, parsedData);
+  },
+
+  bankGetAccounts: (dealId: string): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_GET_ACCOUNTS, dealId);
+  },
+
+  bankGetStatements: (dealId: string): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_GET_STATEMENTS, dealId);
+  },
+
+  bankGetTransactions: (statementId: string): Promise<any[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_GET_TRANSACTIONS, statementId);
+  },
+
+  bankDeleteAccount: (accountId: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_DELETE_ACCOUNT, accountId);
+  },
+
+  bankDeleteStatement: (statementId: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_DELETE_STATEMENT, statementId);
+  },
+
+  bankUpdateStatus: (statementId: string, status: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BANK_UPDATE_STATUS, statementId, status);
   },
 };
 

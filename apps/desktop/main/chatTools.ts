@@ -14,6 +14,13 @@ import {
   calculatePipelineAnalytics,
   addActivitySource,
   getRelevanceThresholds,
+  getBankAccountsByDeal,
+  getStatementsByDeal,
+  getMonthlyBalanceSummary,
+  getCashflowByPeriod,
+  detectSeasonality,
+  searchTransactions,
+  getTransactionsByDealAndDateRange,
 } from './database';
 import { processSchematicToolCall } from './schematic';
 import { createAndOpenEmailDraft, generateEmailBody, type EmailDraft } from './outlook';
@@ -338,6 +345,120 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  // Financial Analysis Tools
+  {
+    type: 'function',
+    function: {
+      name: 'get_balance_summary',
+      description: 'Get monthly balance summary (min, max, average balance) for a deal\'s bank accounts over a date range. Use this when the user asks about account balances, lowest/highest balances, or average balances over time. Results include source bank statement references for citation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to get balance data for.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date in YYYY-MM-DD format. Defaults to 2 years ago if not provided.',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date in YYYY-MM-DD format. Defaults to today if not provided.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_cashflow_by_period',
+      description: 'Get inflows, outflows, and net cashflow grouped by month or quarter for a deal. Use this to analyze cashflow trends, compare periods, and identify patterns. Results include source bank statement references.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to get cashflow data for.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date in YYYY-MM-DD format. Defaults to 2 years ago.',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date in YYYY-MM-DD format. Defaults to today.',
+          },
+          period_type: {
+            type: 'string',
+            enum: ['month', 'quarter'],
+            description: 'Group results by month or quarter. Default is month.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'detect_seasonality',
+      description: 'Analyze bank statement data to detect seasonal patterns in cashflow. Compares same months across multiple years to identify which months consistently have lower or higher cashflow. Requires at least 12 months of transaction data for meaningful results. Returns month-by-month analysis with deviation percentages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to analyze.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date in YYYY-MM-DD format. Defaults to 2 years ago.',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date in YYYY-MM-DD format. Defaults to today.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'query_transactions',
+      description: 'Search and filter bank transactions for a deal by keyword, date range, or amount. Use this when the user asks about specific transactions, payments, deposits, or wants to find particular charges.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to search transactions for.',
+          },
+          keyword: {
+            type: 'string',
+            description: 'Search keyword to match in transaction descriptions.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date filter in YYYY-MM-DD format.',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date filter in YYYY-MM-DD format.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum transactions to return. Default is 50.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -516,6 +637,19 @@ export async function executeTool(
 
       case 'get_hubspot_companies':
         return executeGetHubSpotCompanies(args);
+
+      // Financial Analysis Tools
+      case 'get_balance_summary':
+        return executeGetBalanceSummary(args);
+
+      case 'get_cashflow_by_period':
+        return executeGetCashflowByPeriod(args);
+
+      case 'detect_seasonality':
+        return executeDetectSeasonality(args);
+
+      case 'query_transactions':
+        return executeQueryTransactions(args);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -1256,4 +1390,262 @@ async function executeGetHubSpotCompanies(args: Record<string, unknown>): Promis
       error: error instanceof Error ? error.message : 'Failed to get HubSpot companies',
     };
   }
+}
+
+// ============ Financial Analysis Tool Implementations ============
+
+function getDefaultDateRange(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const endDate = now.toISOString().slice(0, 10);
+  const twoYearsAgo = new Date(now);
+  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+  const startDate = twoYearsAgo.toISOString().slice(0, 10);
+  return { startDate, endDate };
+}
+
+function getSourceInfo(dealId: string): { sourceFiles: string[]; statementCount: number } {
+  const statements = getStatementsByDeal(dealId);
+  return {
+    sourceFiles: [...new Set(statements.map(s => s.fileName))],
+    statementCount: statements.length,
+  };
+}
+
+function executeGetBalanceSummary(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal with ID "${dealId}" not found.` };
+  }
+
+  const defaults = getDefaultDateRange();
+  const startDate = (args.start_date as string) || defaults.startDate;
+  const endDate = (args.end_date as string) || defaults.endDate;
+
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Import bank statements first using the Bank Statement Import feature.`,
+    };
+  }
+
+  const summary = getMonthlyBalanceSummary(dealId, startDate, endDate);
+  if (summary.length === 0) {
+    return {
+      success: false,
+      error: `No transaction data found in the date range ${startDate} to ${endDate}.`,
+    };
+  }
+
+  // Calculate overall statistics
+  const allMinBalances = summary.map(m => m.minBalance);
+  const allAvgBalances = summary.map(m => m.avgBalance);
+  const overallAvgMin = allMinBalances.reduce((a, b) => a + b, 0) / allMinBalances.length;
+  const lowestMinBalance = Math.min(...allMinBalances);
+  const lowestMinMonth = summary.find(m => m.minBalance === lowestMinBalance);
+  const overallAvgBalance = allAvgBalances.reduce((a, b) => a + b, 0) / allAvgBalances.length;
+
+  const sourceInfo = getSourceInfo(dealId);
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      dateRange: { startDate, endDate },
+      monthlyData: summary.map(m => ({
+        month: m.month,
+        avgBalance: Math.round(m.avgBalance * 100) / 100,
+        minBalance: Math.round(m.minBalance * 100) / 100,
+        maxBalance: Math.round(m.maxBalance * 100) / 100,
+        totalDeposits: Math.round(m.totalDeposits * 100) / 100,
+        totalWithdrawals: Math.round(m.totalWithdrawals * 100) / 100,
+        transactionCount: m.transactionCount,
+      })),
+      overallStats: {
+        averageMinBalance: Math.round(overallAvgMin * 100) / 100,
+        lowestBalance: Math.round(lowestMinBalance * 100) / 100,
+        lowestBalanceMonth: lowestMinMonth?.month || 'N/A',
+        averageBalance: Math.round(overallAvgBalance * 100) / 100,
+        monthsAnalyzed: summary.length,
+      },
+      sourceFiles: sourceInfo.sourceFiles,
+      statementCount: sourceInfo.statementCount,
+    },
+    message: `Balance summary for ${deal.borrowerName} (${startDate} to ${endDate}): Average balance $${Math.round(overallAvgBalance).toLocaleString()}, Average lowest monthly balance $${Math.round(overallAvgMin).toLocaleString()}, Lowest recorded balance $${Math.round(lowestMinBalance).toLocaleString()} in ${lowestMinMonth?.month || 'N/A'}. Based on ${sourceInfo.statementCount} bank statements.`,
+  };
+}
+
+function executeGetCashflowByPeriod(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal with ID "${dealId}" not found.` };
+  }
+
+  const defaults = getDefaultDateRange();
+  const startDate = (args.start_date as string) || defaults.startDate;
+  const endDate = (args.end_date as string) || defaults.endDate;
+  const periodType = (args.period_type as 'month' | 'quarter') || 'month';
+
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Import bank statements first.`,
+    };
+  }
+
+  const cashflow = getCashflowByPeriod(dealId, startDate, endDate, periodType);
+  if (cashflow.length === 0) {
+    return {
+      success: false,
+      error: `No transaction data found in the date range ${startDate} to ${endDate}.`,
+    };
+  }
+
+  const totalInflows = cashflow.reduce((s, c) => s + c.inflows, 0);
+  const totalOutflows = cashflow.reduce((s, c) => s + c.outflows, 0);
+  const avgNetCashflow = cashflow.reduce((s, c) => s + c.netCashflow, 0) / cashflow.length;
+
+  const sourceInfo = getSourceInfo(dealId);
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      dateRange: { startDate, endDate },
+      periodType,
+      periods: cashflow.map(c => ({
+        period: c.period,
+        inflows: Math.round(c.inflows * 100) / 100,
+        outflows: Math.round(c.outflows * 100) / 100,
+        netCashflow: Math.round(c.netCashflow * 100) / 100,
+        transactionCount: c.transactionCount,
+      })),
+      totals: {
+        totalInflows: Math.round(totalInflows * 100) / 100,
+        totalOutflows: Math.round(totalOutflows * 100) / 100,
+        avgNetCashflowPerPeriod: Math.round(avgNetCashflow * 100) / 100,
+        periodsAnalyzed: cashflow.length,
+      },
+      sourceFiles: sourceInfo.sourceFiles,
+      statementCount: sourceInfo.statementCount,
+    },
+    message: `Cashflow analysis for ${deal.borrowerName} by ${periodType} (${startDate} to ${endDate}): Total inflows $${Math.round(totalInflows).toLocaleString()}, Total outflows $${Math.round(totalOutflows).toLocaleString()}, Avg net cashflow per ${periodType} $${Math.round(avgNetCashflow).toLocaleString()}. Based on ${sourceInfo.statementCount} bank statements.`,
+  };
+}
+
+function executeDetectSeasonality(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal with ID "${dealId}" not found.` };
+  }
+
+  const defaults = getDefaultDateRange();
+  const startDate = (args.start_date as string) || defaults.startDate;
+  const endDate = (args.end_date as string) || defaults.endDate;
+
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Import bank statements first.`,
+    };
+  }
+
+  const result = detectSeasonality(dealId, startDate, endDate);
+
+  if (result.monthlyPattern.length === 0) {
+    return {
+      success: false,
+      error: `No transaction data found for seasonality analysis in the date range ${startDate} to ${endDate}.`,
+    };
+  }
+
+  const sourceInfo = getSourceInfo(dealId);
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      dateRange: { startDate, endDate },
+      seasonalityStrength: result.seasonalityStrength,
+      overallAvgMonthlyNet: result.overallAvgMonthlyNet,
+      monthlyPattern: result.monthlyPattern,
+      lowMonths: result.lowMonths,
+      highMonths: result.highMonths,
+      sourceFiles: sourceInfo.sourceFiles,
+      statementCount: sourceInfo.statementCount,
+    },
+    message: `Seasonality analysis for ${deal.borrowerName}: ${result.seasonalityStrength} seasonality detected. ${result.lowMonths.length > 0 ? `Low cashflow months: ${result.lowMonths.join(', ')}.` : 'No consistently low months.'} ${result.highMonths.length > 0 ? `High cashflow months: ${result.highMonths.join(', ')}.` : ''} Based on ${result.sourceInfo.statementCount} bank statements.`,
+  };
+}
+
+function executeQueryTransactions(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal with ID "${dealId}" not found.` };
+  }
+
+  const keyword = args.keyword as string | undefined;
+  const startDate = args.start_date as string | undefined;
+  const endDate = args.end_date as string | undefined;
+  const limit = (args.limit as number) || 50;
+
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Import bank statements first.`,
+    };
+  }
+
+  let transactions;
+  if (keyword) {
+    transactions = searchTransactions(dealId, keyword, limit);
+  } else if (startDate && endDate) {
+    transactions = getTransactionsByDealAndDateRange(dealId, startDate, endDate).slice(0, limit);
+  } else {
+    // Default to last 3 months
+    const now = new Date();
+    const threeMonthsAgo = new Date(now);
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    transactions = getTransactionsByDealAndDateRange(
+      dealId,
+      threeMonthsAgo.toISOString().slice(0, 10),
+      now.toISOString().slice(0, 10)
+    ).slice(0, limit);
+  }
+
+  const totalDebits = transactions.reduce((s, t) => s + t.debit, 0);
+  const totalCredits = transactions.reduce((s, t) => s + t.credit, 0);
+  const sourceInfo = getSourceInfo(dealId);
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      transactions: transactions.map(t => ({
+        date: t.transactionDate,
+        description: t.description,
+        debit: t.debit > 0 ? Math.round(t.debit * 100) / 100 : null,
+        credit: t.credit > 0 ? Math.round(t.credit * 100) / 100 : null,
+        balance: t.runningBalance != null ? Math.round(t.runningBalance * 100) / 100 : null,
+        category: t.category,
+      })),
+      summary: {
+        count: transactions.length,
+        totalDebits: Math.round(totalDebits * 100) / 100,
+        totalCredits: Math.round(totalCredits * 100) / 100,
+        searchKeyword: keyword || null,
+        dateRange: startDate && endDate ? `${startDate} to ${endDate}` : null,
+      },
+      sourceFiles: sourceInfo.sourceFiles,
+      statementCount: sourceInfo.statementCount,
+    },
+    message: `Found ${transactions.length} transactions for ${deal.borrowerName}${keyword ? ` matching "${keyword}"` : ''}. Total debits: $${Math.round(totalDebits).toLocaleString()}, Total credits: $${Math.round(totalCredits).toLocaleString()}. Based on ${sourceInfo.statementCount} bank statements.`,
+  };
 }

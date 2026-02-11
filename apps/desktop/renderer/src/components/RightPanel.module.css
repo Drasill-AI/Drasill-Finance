@@ -441,6 +441,48 @@
   margin: 8px 0;
 }
 
+/* Markdown tables */
+.markdownTableWrapper {
+  overflow-x: auto;
+  margin: 6px 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.markdownTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.markdownTable th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border-subtle);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.markdownTable td {
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+
+.markdownTable tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.markdownTable tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.markdownTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .codeBlock {
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--border-subtle);

@@ -30,7 +30,7 @@ import {
   MemoGenerationRequest,
 } from '@drasill/shared';
 import { sendChatMessage, setApiKey, getApiKey, hasApiKey, cancelStream } from './chat';
-import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady } from './rag';
+import { indexWorkspace, indexOneDriveWorkspace, searchRAG, getIndexingStatus, clearVectorStore, resetOpenAI, tryLoadCachedVectorStore, setPdfExtractionReady, setCohereApiKey, getCohereApiKeyMasked, deleteCohereApiKey } from './rag';
 import { processSchematicToolCall, getSchematicImage } from './schematic';
 import {
   startOneDriveAuth,
@@ -127,6 +127,13 @@ import {
   getMemosByDeal,
   updateGeneratedMemo,
   deleteGeneratedMemo,
+  // Bank Statement functions
+  getBankAccountsByDeal,
+  deleteBankAccount,
+  getStatementsByDeal,
+  deleteBankStatement,
+  updateBankStatementStatus,
+  getTransactionsByStatement,
 } from './database';
 import {
   exportDealToPDF,
@@ -1464,6 +1471,39 @@ export function setupIpcHandlers(): void {
   });
 
   // ==========================================
+  // Cohere API Key Management
+  // ==========================================
+
+  ipcMain.handle(IPC_CHANNELS.COHERE_SET_API_KEY, async (_event, apiKey: string): Promise<boolean> => {
+    try {
+      console.log('[IPC] Setting Cohere API key');
+      return await setCohereApiKey(apiKey);
+    } catch (error) {
+      console.error('[IPC] Failed to set Cohere API key:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COHERE_GET_API_KEY, async (): Promise<string | null> => {
+    try {
+      return await getCohereApiKeyMasked();
+    } catch (error) {
+      console.error('[IPC] Failed to get Cohere API key:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COHERE_DELETE_API_KEY, async (): Promise<boolean> => {
+    try {
+      console.log('[IPC] Deleting Cohere API key');
+      return await deleteCohereApiKey();
+    } catch (error) {
+      console.error('[IPC] Failed to delete Cohere API key:', error);
+      return false;
+    }
+  });
+
+  // ==========================================
   // Chat History
   // ==========================================
 
@@ -1844,6 +1884,94 @@ export function setupIpcHandlers(): void {
       console.error('[IPC] Export memo error:', error);
       throw error;
     }
+  });
+
+  // ============ Bank Statement Analysis ============
+
+  // Select a bank statement file (CSV or PDF)
+  ipcMain.handle(IPC_CHANNELS.BANK_SELECT_FILE, async (): Promise<{ filePath: string; fileName: string; fileType: string } | null> => {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Bank Statement',
+      filters: [
+        { name: 'Bank Statements', extensions: ['csv', 'pdf', 'xlsx', 'xls'] },
+        { name: 'CSV Files', extensions: ['csv'] },
+        { name: 'PDF Files', extensions: ['pdf'] },
+        { name: 'Excel Files', extensions: ['xlsx', 'xls'] },
+      ],
+      properties: ['openFile'],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const filePath = result.filePaths[0];
+    const fileName = path.basename(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const fileType = ext === '.csv' ? 'csv' : ext === '.pdf' ? 'pdf' : 'excel';
+
+    return { filePath, fileName, fileType };
+  });
+
+  // Parse a CSV bank statement
+  ipcMain.handle(IPC_CHANNELS.BANK_PARSE_CSV, async (_event, filePath: string) => {
+    try {
+      const { parseCSVBankStatement } = await import('./bankStatementParser');
+      const parsed = await parseCSVBankStatement(filePath);
+      return { success: true, data: parsed };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Parse failed' };
+    }
+  });
+
+  // Parse PDF bank statement text using LLM
+  ipcMain.handle(IPC_CHANNELS.BANK_PARSE_PDF, async (_event, extractedText: string, fileName: string) => {
+    try {
+      const { parsePDFBankStatement } = await import('./bankStatementParser');
+      const parsed = await parsePDFBankStatement(extractedText, fileName);
+      return { success: true, data: parsed };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Parse failed' };
+    }
+  });
+
+  // Import parsed statement into database
+  ipcMain.handle(IPC_CHANNELS.BANK_IMPORT_STATEMENT, async (_event, dealId: string, filePath: string, fileName: string, parsedData: any) => {
+    try {
+      const { importBankStatement } = await import('./bankStatementParser');
+      const result = await importBankStatement(dealId, filePath, fileName, parsedData);
+      return result;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Import failed' };
+    }
+  });
+
+  // Get bank accounts for a deal
+  ipcMain.handle(IPC_CHANNELS.BANK_GET_ACCOUNTS, async (_event, dealId: string) => {
+    return getBankAccountsByDeal(dealId);
+  });
+
+  // Get bank statements for a deal
+  ipcMain.handle(IPC_CHANNELS.BANK_GET_STATEMENTS, async (_event, dealId: string) => {
+    return getStatementsByDeal(dealId);
+  });
+
+  // Get transactions for a statement
+  ipcMain.handle(IPC_CHANNELS.BANK_GET_TRANSACTIONS, async (_event, statementId: string) => {
+    return getTransactionsByStatement(statementId);
+  });
+
+  // Delete bank account
+  ipcMain.handle(IPC_CHANNELS.BANK_DELETE_ACCOUNT, async (_event, accountId: string) => {
+    return deleteBankAccount(accountId);
+  });
+
+  // Delete bank statement
+  ipcMain.handle(IPC_CHANNELS.BANK_DELETE_STATEMENT, async (_event, statementId: string) => {
+    return deleteBankStatement(statementId);
+  });
+
+  // Update statement status
+  ipcMain.handle(IPC_CHANNELS.BANK_UPDATE_STATUS, async (_event, statementId: string, status: string) => {
+    return updateBankStatementStatus(statementId, status as 'parsed' | 'verified' | 'rejected');
   });
 }
 

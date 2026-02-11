@@ -20,6 +20,9 @@ function parseMarkdown(text: string): ReactNode[] {
   let codeLanguage = '';
   let listItems: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
+  let tableRows: string[][] = [];
+  let tableAlignments: ('left' | 'center' | 'right' | null)[] = [];
+  let hasTableHeader = false;
 
   const flushList = () => {
     if (listItems.length > 0 && listType) {
@@ -33,6 +36,40 @@ function parseMarkdown(text: string): ReactNode[] {
       }
       listItems = [];
       listType = null;
+    }
+  };
+
+  const flushTable = () => {
+    if (tableRows.length > 0) {
+      const headerRow = hasTableHeader ? tableRows[0] : null;
+      const bodyRows = hasTableHeader ? tableRows.slice(1) : tableRows;
+      elements.push(
+        <div key={elements.length} className={styles.markdownTableWrapper}>
+          <table className={styles.markdownTable}>
+            {headerRow && (
+              <thead>
+                <tr>
+                  {headerRow.map((cell, ci) => (
+                    <th key={ci} style={{ textAlign: tableAlignments[ci] || 'left' }}>{formatInlineText(cell)}</th>
+                  ))}
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {bodyRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{ textAlign: tableAlignments[ci] || 'left' }}>{formatInlineText(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      tableRows = [];
+      tableAlignments = [];
+      hasTableHeader = false;
     }
   };
 
@@ -117,6 +154,31 @@ function parseMarkdown(text: string): ReactNode[] {
       continue;
     }
 
+    // Markdown table rows: | col | col | col |
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      flushList();
+      const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+      
+      // Check if this is a separator row (|---|---|---|)
+      const isSeparator = cells.every(c => /^:?-{2,}:?$/.test(c));
+      
+      if (isSeparator) {
+        // Parse alignment from separator
+        tableAlignments = cells.map(c => {
+          if (c.startsWith(':') && c.endsWith(':')) return 'center';
+          if (c.endsWith(':')) return 'right';
+          return 'left';
+        });
+        hasTableHeader = tableRows.length === 1;
+      } else {
+        tableRows.push(cells);
+      }
+      continue;
+    } else if (tableRows.length > 0) {
+      // Non-table line encountered, flush accumulated table
+      flushTable();
+    }
+
     // Headers
     const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (headerMatch) {
@@ -161,16 +223,19 @@ function parseMarkdown(text: string): ReactNode[] {
     // Empty line
     if (line.trim() === '') {
       flushList();
+      flushTable();
       continue;
     }
 
     // Regular paragraph
     flushList();
+    flushTable();
     elements.push(<p key={elements.length} className={styles.markdownP}>{formatInlineText(line)}</p>);
   }
 
   // Flush any remaining list
   flushList();
+  flushTable();
 
   // If still in code block, close it
   if (inCodeBlock && codeContent.length > 0) {
@@ -203,6 +268,11 @@ export function RightPanel() {
   // HubSpot connection state
   const [hubspotStatus, setHubspotStatus] = useState<{ connected: boolean; email?: string; portalId?: string }>({ connected: false });
   const [isConnectingHubspot, setIsConnectingHubspot] = useState(false);
+  
+  // Cohere API key state
+  const [cohereKeyMasked, setCohereKeyMasked] = useState<string | null>(null);
+  const [cohereKeyInput, setCohereKeyInput] = useState('');
+  const [isSavingCohere, setIsSavingCohere] = useState(false);
   
   const {
     chatMessages,
@@ -295,6 +365,45 @@ export function RightPanel() {
       setHubspotStatus({ connected: false });
     } catch (error) {
       console.error('HubSpot disconnect error:', error);
+    }
+  };
+
+  // Load Cohere API key status
+  useEffect(() => {
+    const loadCohereKey = async () => {
+      try {
+        const masked = await window.electronAPI.getCohereApiKey();
+        setCohereKeyMasked(masked);
+      } catch (error) {
+        console.error('Failed to load Cohere key:', error);
+      }
+    };
+    loadCohereKey();
+  }, []);
+
+  const handleSaveCohereKey = async () => {
+    if (!cohereKeyInput.trim()) return;
+    setIsSavingCohere(true);
+    try {
+      const success = await window.electronAPI.setCohereApiKey(cohereKeyInput.trim());
+      if (success) {
+        const masked = await window.electronAPI.getCohereApiKey();
+        setCohereKeyMasked(masked);
+        setCohereKeyInput('');
+      }
+    } catch (error) {
+      console.error('Failed to save Cohere key:', error);
+    } finally {
+      setIsSavingCohere(false);
+    }
+  };
+
+  const handleDeleteCohereKey = async () => {
+    try {
+      await window.electronAPI.deleteCohereApiKey();
+      setCohereKeyMasked(null);
+    } catch (error) {
+      console.error('Failed to delete Cohere key:', error);
     }
   };
 
@@ -657,6 +766,62 @@ export function RightPanel() {
                 >
                   {isConnectingHubspot ? 'Connecting...' : 'Connect HubSpot'}
                 </button>
+              </>
+            )}
+          </div>
+
+          {/* Cohere Reranking Section */}
+          <div className={styles.settingsForm} style={{ marginTop: '16px' }}>
+            <label className={styles.label}>Search Reranking (Cohere)</label>
+            {cohereKeyMasked ? (
+              <>
+                <div className={styles.hubspotConnected}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#00a4bd" strokeWidth="2" width="16" height="16">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                  </svg>
+                  <span>API Key Set</span>
+                </div>
+                <p className={styles.hint}>{cohereKeyMasked}</p>
+                <button 
+                  className={styles.clearRagButton}
+                  onClick={handleDeleteCohereKey}
+                  style={{ marginTop: '8px' }}
+                >
+                  Remove Key
+                </button>
+              </>
+            ) : (
+              <>
+                <p className={styles.hint}>
+                  Add a Cohere API key to enable AI-powered search reranking for more accurate results. Free at cohere.com.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                  <input
+                    type="password"
+                    placeholder="Enter Cohere API key..."
+                    value={cohereKeyInput}
+                    onChange={(e) => setCohereKeyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCohereKey(); }}
+                    style={{
+                      flex: 1,
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '4px',
+                      color: 'var(--text-primary)',
+                      padding: '6px 8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <button 
+                    className={styles.indexButton}
+                    onClick={handleSaveCohereKey}
+                    disabled={isSavingCohere || !cohereKeyInput.trim()}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {isSavingCohere ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
               </>
             )}
           </div>

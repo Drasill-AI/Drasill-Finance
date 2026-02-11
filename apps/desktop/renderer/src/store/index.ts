@@ -58,6 +58,9 @@ interface AppState {
   detectedDeal: Deal | null;
   isActivityModalOpen: boolean;
   isDealModalOpen: boolean;
+  isBankStatementImportOpen: boolean;
+  bankStatementDealId: string | null;
+  bankStatementDealName: string | null;
   activitiesRefreshTrigger: number;
   editingActivity: DealActivity | null;
   editingDeal: Deal | null;
@@ -147,6 +150,8 @@ interface AppState {
   detectDealFromFile: (path: string) => Promise<void>;
   setActivityModalOpen: (open: boolean) => void;
   setDealModalOpen: (open: boolean) => void;
+  openBankStatementImport: (dealId: string, dealName: string) => void;
+  closeBankStatementImport: () => void;
   setEditingActivity: (activity: DealActivity | null) => void;
   setEditingDeal: (deal: Deal | null) => void;
   refreshActivities: () => void;
@@ -220,6 +225,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   detectedDeal: null,
   isActivityModalOpen: false,
   isDealModalOpen: false,
+  isBankStatementImportOpen: false,
+  bankStatementDealId: null as string | null,
+  bankStatementDealName: null as string | null,
   activitiesRefreshTrigger: 0,
   editingActivity: null,
   editingDeal: null,
@@ -1284,6 +1292,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!open) {
       set({ editingDeal: null });
     }
+  },
+
+  openBankStatementImport: (dealId: string, dealName: string) => {
+    set({ isBankStatementImportOpen: true, bankStatementDealId: dealId, bankStatementDealName: dealName });
+  },
+
+  closeBankStatementImport: () => {
+    set({ isBankStatementImportOpen: false, bankStatementDealId: null, bankStatementDealName: null });
   },
 
   setEditingDeal: (deal: Deal | null) => {

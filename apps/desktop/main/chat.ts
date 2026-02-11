@@ -48,7 +48,31 @@ interface RAGSource {
 }
 
 /**
- * Build the system prompt with optional file context and RAG context
+ * Rough token estimation (~4 chars per token for English text)
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Truncate text to fit within a token budget
+ */
+function truncateToTokenBudget(text: string, maxTokens: number): string {
+  const maxChars = maxTokens * 4;
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + '\n\n[... truncated to fit context window ...]';
+}
+
+// Token budget allocation for system prompt sections
+const TOTAL_SYSTEM_BUDGET = 12000; // ~12K tokens for entire system prompt
+const KNOWLEDGE_PROFILE_BUDGET = 2000; // Knowledge profile guidelines
+const DEAL_PIPELINE_BUDGET = 1500; // Deal pipeline context
+const RAG_CONTEXT_BUDGET = 6000; // RAG retrieved chunks (highest priority)
+const FILE_CONTEXT_BUDGET = 2000; // Current file context
+
+/**
+ * Build the system prompt with dynamic token budgeting
+ * Allocates tokens across sections by priority, truncating low-priority sections first
  * Returns both the prompt and any RAG sources for citation
  * @param context - Current file context if any
  * @param userQuery - The user's query for RAG search
@@ -64,80 +88,109 @@ Your capabilities:
 - Help find specific information in indexed documents
 - Manage deals through the pipeline via function calls (add activities, update stages)
 - Provide pipeline analytics and deal tracking
+- Analyze bank statements: balance summaries, cashflow trends, seasonality detection, and transaction search
 
 When users want to add activities or update deal stages, use the available tools. For stage changes, always ask for confirmation first by calling the tool with confirmed=false.
 
+FINANCIAL DATA FORMATTING:
+When returning financial analysis results (balance summaries, cashflow data, seasonality patterns, transactions), format the data as markdown tables for clarity. Use the | column | format with alignment separators.
+- Currency values should include $ signs and commas (e.g., $12,345.67)
+- Include a brief narrative summary below the table highlighting key findings
+- When source bank statement files are provided in tool results, cite them using [[1]], [[2]] format
+- Flag notably low or high values in your narrative
+
 Be concise, accurate, and helpful. When referencing information from provided context, cite specific sources or file names using [[1]], [[2]] format. Summarize actions you take.`;
 
-  // Add active knowledge profile context (soft guardrails)
+  let remainingBudget = TOTAL_SYSTEM_BUDGET - estimateTokens(systemPrompt);
+
+  // Add active knowledge profile context (soft guardrails) - medium priority
   const { profile: activeProfile, fullGuidelines } = getActiveProfileWithInheritance();
   if (activeProfile && fullGuidelines) {
-    systemPrompt += `\n\n--- KNOWLEDGE PROFILE: ${activeProfile.name.toUpperCase()} ---
+    let profileSection = `\n\n--- KNOWLEDGE PROFILE: ${activeProfile.name.toUpperCase()} ---
 The following contextual guidelines apply to this conversation. These are suggestions to help ensure consistency and accuracy, not strict rules:
 
 ${fullGuidelines}`;
     
     if (activeProfile.terminology) {
-      systemPrompt += `\n\nKey Terminology:\n${activeProfile.terminology}`;
+      profileSection += `\n\nKey Terminology:\n${activeProfile.terminology}`;
     }
     
     if (activeProfile.complianceChecks) {
-      systemPrompt += `\n\nCompliance Considerations (soft reminders, not blocking requirements):\n${activeProfile.complianceChecks}`;
+      profileSection += `\n\nCompliance Considerations (soft reminders, not blocking requirements):\n${activeProfile.complianceChecks}`;
     }
     
-    systemPrompt += `\n--- END KNOWLEDGE PROFILE ---`;
+    profileSection += `\n--- END KNOWLEDGE PROFILE ---`;
+    
+    // Truncate to budget
+    const profileBudget = Math.min(KNOWLEDGE_PROFILE_BUDGET, Math.floor(remainingBudget * 0.2));
+    profileSection = truncateToTokenBudget(profileSection, profileBudget);
+    systemPrompt += profileSection;
+    remainingBudget -= estimateTokens(profileSection);
   }
 
-  // Add deal pipeline context
+  // Add deal pipeline context - medium priority
   const dealContext = buildDealContext(currentDealId);
-  systemPrompt += `\n\n--- DEAL PIPELINE ---\n${dealContext}\n--- END DEAL PIPELINE ---`;
+  const dealBudget = Math.min(DEAL_PIPELINE_BUDGET, Math.floor(remainingBudget * 0.15));
+  const truncatedDealContext = truncateToTokenBudget(dealContext, dealBudget);
+  const dealSection = `\n\n--- DEAL PIPELINE ---\n${truncatedDealContext}\n--- END DEAL PIPELINE ---`;
+  systemPrompt += dealSection;
+  remainingBudget -= estimateTokens(dealSection);
 
-  // Add RAG context if available
+  // Add RAG context if available - HIGHEST priority (gets largest budget)
   const ragStatus = getIndexingStatus();
   let ragSources: RAGSource[] = [];
   
   if (ragStatus.chunksCount > 0 && userQuery) {
     try {
-      // Pass dealId for deal-scoped search
       const ragResult = await getRAGContext(userQuery, currentDealId);
       if (ragResult.context) {
         ragSources = ragResult.sources;
         
-        // Add note about sources from other deals if present
         const hasOtherDealSources = ragSources.some(s => s.fromOtherDeal);
         const otherDealNote = hasOtherDealSources 
           ? '\n\nNote: Some sources marked [FROM OTHER DEAL] are from deals other than the current focus.'
           : '';
         
-        systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---
+        // RAG gets the lion's share of remaining budget
+        const ragBudget = Math.min(RAG_CONTEXT_BUDGET, Math.floor(remainingBudget * 0.7));
+        const truncatedRagContext = truncateToTokenBudget(ragResult.context, ragBudget);
+        
+        const ragSection = `\n\n--- KNOWLEDGE BASE CONTEXT ---
 The following numbered sources were retrieved from the user's indexed documentation:
 
-${ragResult.context}
+${truncatedRagContext}
 --- END KNOWLEDGE BASE CONTEXT ---
 
 IMPORTANT: When referencing information from the knowledge base, cite using the format [[1]], [[2]], etc. corresponding to the source numbers above. Always cite your sources when providing information from the documentation.${otherDealNote}`;
+        
+        systemPrompt += ragSection;
+        remainingBudget -= estimateTokens(ragSection);
       }
     } catch (error) {
       console.error('Failed to get RAG context:', error);
     }
   }
 
+  // Add current file context - lower priority (uses whatever budget remains)
   if (context) {
-    const contentPreview = context.content.length > 6000 
-      ? context.content.slice(0, 6000) + '\n\n[... content truncated ...]'
-      : context.content;
+    const fileBudget = Math.min(FILE_CONTEXT_BUDGET, remainingBudget - 100); // Keep small reserve
+    const truncatedContent = truncateToTokenBudget(context.content, Math.max(fileBudget - 50, 500));
 
-    systemPrompt += `\n\n--- CURRENT FILE CONTEXT ---
+    const fileSection = `\n\n--- CURRENT FILE CONTEXT ---
 File: ${context.fileName}
 Path: ${context.filePath}
 Type: ${context.fileType}
 
 Content:
-${contentPreview}
+${truncatedContent}
 --- END FILE CONTEXT ---
 
 The user is viewing this file. Answer questions with reference to this content when relevant.`;
+    
+    systemPrompt += fileSection;
   }
+
+  console.log(`[Chat] System prompt built: ~${estimateTokens(systemPrompt)} tokens, ${ragSources.length} RAG sources`);
 
   return { prompt: systemPrompt, ragSources };
 }

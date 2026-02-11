@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { IPC_CHANNELS, TEXT_EXTENSIONS, DOCUMENT_EXTENSIONS, IGNORED_PATTERNS } from '@drasill/shared';
 import * as keychain from './keychain';
@@ -9,6 +10,9 @@ import { incrementUsage } from './usage';
 
 // For Word doc parsing
 import mammoth from 'mammoth';
+
+// For Excel parsing
+import * as XLSX from 'xlsx';
 
 // PDF extraction request tracking
 interface PdfExtractionRequest {
@@ -31,6 +35,10 @@ interface DocumentChunk {
   source?: 'local' | 'onedrive'; // Source type
   oneDriveId?: string; // OneDrive item ID for cloud files
   lastModified?: number; // File modification timestamp for incremental indexing
+  parentId?: string; // ID of parent chunk for hierarchical retrieval
+  sectionHeading?: string; // Section heading this chunk belongs to
+  chunkType?: 'parent' | 'child'; // Whether this is a parent or child chunk
+  contentHash?: string; // MD5 hash of content for dedup
 }
 
 interface FileMetadata {
@@ -38,6 +46,7 @@ interface FileMetadata {
   fileId: string; // filePath for local, oneDriveId for cloud
   lastModified: number;
   chunkCount: number;
+  contentHash: string; // MD5 hash of file content for incremental indexing
 }
 
 interface VectorStore {
@@ -51,10 +60,12 @@ let vectorStore: VectorStore | null = null;
 let isIndexing = false;
 let openai: OpenAI | null = null;
 
-const CHUNK_SIZE = 1000; // Characters per chunk (used as max for semantic chunking)
-const CHUNK_OVERLAP = 200; // Overlap between chunks
+// Hierarchical chunk sizes
+const PARENT_CHUNK_SIZE = 3000; // Characters per parent chunk (larger context window)
+const CHILD_CHUNK_SIZE = 500; // Characters per child chunk (precise retrieval)
+const CHUNK_OVERLAP = 100; // Overlap between child chunks
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB max per file (PDFs can be large)
-const VECTOR_STORE_VERSION = 4; // Increment when format changes (added incremental indexing)
+const VECTOR_STORE_VERSION = 5; // Bumped for hierarchical chunking + incremental indexing
 
 // Hybrid search constants
 const BM25_K1 = 1.5; // Term frequency saturation parameter
@@ -156,77 +167,103 @@ async function getOpenAI(): Promise<OpenAI | null> {
  * Split text into sentences using simple heuristics
  */
 function splitIntoSentences(text: string): string[] {
-  // Split on sentence-ending punctuation followed by space or newline
-  // But avoid splitting on abbreviations like "Dr.", "Mr.", "e.g.", etc.
-  const sentences: string[] = [];
-  
-  // Common abbreviations to avoid splitting on
   const abbreviations = /(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|e\.g|i\.e|viz|al|fig|vol|no|pp|ch|sec)\./gi;
-  
-  // Replace abbreviation periods with placeholder
   let processedText = text.replace(abbreviations, (match) => match.replace('.', '<<<DOT>>>'));
-  
-  // Split on sentence boundaries
   const parts = processedText.split(/(?<=[.!?])\s+/);
-  
+  const sentences: string[] = [];
   for (const part of parts) {
-    // Restore abbreviation periods
     const sentence = part.replace(/<<<DOT>>>/g, '.').trim();
-    if (sentence) {
-      sentences.push(sentence);
-    }
+    if (sentence) sentences.push(sentence);
   }
-  
   return sentences;
 }
 
 /**
- * Semantic chunking - split at natural boundaries (sentences, paragraphs)
- * Creates chunks that respect semantic boundaries while staying under maxSize
+ * Detect section headings in text (Markdown, document-style headings)
  */
-function chunkTextSemantic(text: string, maxSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
-  const chunks: string[] = [];
+function detectSections(text: string): Array<{ heading: string; content: string }> {
+  const sections: Array<{ heading: string; content: string }> = [];
   
-  // First, split into paragraphs
+  // Split by various heading patterns:
+  // Markdown: # Heading, ## Heading, ### Heading
+  // Document: ALL CAPS lines, lines ending with colon, underlined headings
+  const headingPattern = /^(#{1,4}\s+.+|[A-Z][A-Z\s]{4,}[A-Z]|.+\n[=\-]{3,}|[A-Z].{0,60}:)\s*$/gm;
+  
+  let match;
+  
+  const matches: Array<{ heading: string; index: number }> = [];
+  while ((match = headingPattern.exec(text)) !== null) {
+    matches.push({ heading: match[1].replace(/^#+\s+/, '').trim(), index: match.index });
+  }
+  
+  if (matches.length === 0) {
+    // No headings found, return entire text as one section
+    return [{ heading: '', content: text }];
+  }
+  
+  for (let i = 0; i < matches.length; i++) {
+    // Content before first heading
+    if (i === 0 && matches[0].index > 0) {
+      const preamble = text.slice(0, matches[0].index).trim();
+      if (preamble.length > 30) {
+        sections.push({ heading: '', content: preamble });
+      }
+    }
+    
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+    const content = text.slice(start, end).trim();
+    
+    if (content.length > 20) {
+      sections.push({ heading: matches[i].heading, content });
+    }
+  }
+  
+  if (sections.length === 0) {
+    return [{ heading: '', content: text }];
+  }
+  
+  return sections;
+}
+
+/**
+ * Create child chunks from text with overlap
+ * Respects sentence boundaries when possible
+ */
+function createChildChunks(text: string, maxSize = CHILD_CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+  const chunks: string[] = [];
   const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
   
   let currentChunk = '';
-  let overlapBuffer = ''; // Keep track of content for overlap
   
   for (const paragraph of paragraphs) {
     const trimmedPara = paragraph.trim();
     
-    // If paragraph alone exceeds maxSize, split it into sentences
     if (trimmedPara.length > maxSize) {
-      // Flush current chunk if any
+      // Flush current chunk
       if (currentChunk.trim()) {
         chunks.push(currentChunk.trim());
-        overlapBuffer = currentChunk.slice(-overlap);
-        currentChunk = overlapBuffer;
+        currentChunk = '';
       }
       
-      // Split paragraph into sentences
+      // Split large paragraph into sentences
       const sentences = splitIntoSentences(trimmedPara);
-      
       for (const sentence of sentences) {
         if (currentChunk.length + sentence.length + 1 > maxSize) {
           if (currentChunk.trim()) {
             chunks.push(currentChunk.trim());
-            overlapBuffer = currentChunk.slice(-overlap);
-            currentChunk = overlapBuffer;
+            // Overlap: keep last portion
+            currentChunk = currentChunk.slice(-overlap);
           }
         }
         currentChunk += (currentChunk && !currentChunk.endsWith(' ') ? ' ' : '') + sentence;
       }
     } else {
-      // Check if adding this paragraph exceeds maxSize
       const separator = currentChunk ? '\n\n' : '';
       if (currentChunk.length + separator.length + trimmedPara.length > maxSize) {
-        // Save current chunk and start new one with overlap
         if (currentChunk.trim()) {
           chunks.push(currentChunk.trim());
-          overlapBuffer = currentChunk.slice(-overlap);
-          currentChunk = overlapBuffer + (overlapBuffer ? '\n\n' : '') + trimmedPara;
+          currentChunk = currentChunk.slice(-overlap) + '\n\n' + trimmedPara;
         } else {
           currentChunk = trimmedPara;
         }
@@ -236,28 +273,112 @@ function chunkTextSemantic(text: string, maxSize = CHUNK_SIZE, overlap = CHUNK_O
     }
   }
   
-  // Don't forget the last chunk
   if (currentChunk.trim()) {
     chunks.push(currentChunk.trim());
   }
   
-  return chunks.filter(c => c.length > 20); // Filter out very small chunks
+  return chunks.filter(c => c.length > 20);
+}
+
+/**
+ * Hierarchical chunking: creates parent chunks (large context) and child chunks (precise retrieval)
+ * Child chunks point back to their parent for context expansion during retrieval
+ */
+function chunkTextHierarchical(
+  text: string, 
+  filePath: string, 
+  _fileName?: string,
+  options?: { pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string }
+): Array<{ content: string; chunkType: 'parent' | 'child'; parentId?: string; sectionHeading?: string; pageNumber?: number }> {
+  const results: Array<{ content: string; chunkType: 'parent' | 'child'; parentId?: string; sectionHeading?: string; pageNumber?: number }> = [];
+  
+  // Detect sections
+  const sections = detectSections(text);
+  
+  let parentIndex = 0;
+  
+  for (const section of sections) {
+    const sectionText = section.content;
+    
+    // Create parent chunks from section text
+    // If section is small enough, it becomes one parent chunk
+    if (sectionText.length <= PARENT_CHUNK_SIZE) {
+      const parentId = `${filePath}-parent-${parentIndex}`;
+      parentIndex++;
+      
+      // Add parent chunk
+      results.push({
+        content: sectionText,
+        chunkType: 'parent',
+        sectionHeading: section.heading,
+        pageNumber: options?.pageNumber,
+      });
+      
+      // Create child chunks from this parent
+      const childTexts = createChildChunks(sectionText);
+      for (const childText of childTexts) {
+        results.push({
+          content: childText,
+          chunkType: 'child',
+          parentId,
+          sectionHeading: section.heading,
+          pageNumber: options?.pageNumber,
+        });
+      }
+    } else {
+      // Section too large — split into multiple parent chunks
+      const parentTexts = createChildChunks(sectionText, PARENT_CHUNK_SIZE, 200);
+      
+      for (const parentText of parentTexts) {
+        const parentId = `${filePath}-parent-${parentIndex}`;
+        parentIndex++;
+        
+        results.push({
+          content: parentText,
+          chunkType: 'parent',
+          sectionHeading: section.heading,
+          pageNumber: options?.pageNumber,
+        });
+        
+        // Create child chunks from this parent
+        const childTexts = createChildChunks(parentText);
+        for (const childText of childTexts) {
+          results.push({
+            content: childText,
+            chunkType: 'child',
+            parentId,
+            sectionHeading: section.heading,
+            pageNumber: options?.pageNumber,
+          });
+        }
+      }
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * Semantic chunking - kept as wrapper for backwards compatibility
+ * Now uses child-chunk-sized pieces
+ */
+function chunkTextSemantic(text: string, maxSize = CHILD_CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+  return createChildChunks(text, maxSize, overlap);
 }
 
 /**
  * Split text into overlapping chunks (legacy - kept for backwards compatibility)
  */
-function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
-  // Use semantic chunking by default
+function chunkText(text: string, chunkSize = CHILD_CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
   return chunkTextSemantic(text, chunkSize, overlap);
 }
 
 /**
  * Split PDF text into chunks while tracking page numbers
  * PDF text from extractor contains "--- Page X ---" markers
- * Uses semantic chunking within each page
+ * Uses hierarchical chunking within each page
  */
-function chunkPdfText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): Array<{ text: string; pageNumber: number }> {
+function chunkPdfText(text: string, chunkSize = CHILD_CHUNK_SIZE, overlap = CHUNK_OVERLAP): Array<{ text: string; pageNumber: number }> {
   const chunks: Array<{ text: string; pageNumber: number }> = [];
   
   // Split by page markers
@@ -385,6 +506,70 @@ async function extractWordText(filePath: string): Promise<string> {
 }
 
 /**
+ * Extract text from Excel file (.xlsx, .xls)
+ * Converts each sheet into structured text with column headers preserved
+ * Table-aware: keeps rows together to avoid splitting mid-record
+ */
+function extractExcelText(filePath: string): string {
+  try {
+    const workbook = XLSX.readFile(filePath, { type: 'file' });
+    const parts: string[] = [];
+    
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      
+      // Convert to array of arrays for structured output
+      const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+      if (!data || data.length === 0) continue;
+      
+      parts.push(`## Sheet: ${sheetName}`);
+      
+      // First row as headers
+      const headers = data[0]?.map((h: any) => String(h ?? '').trim()) || [];
+      
+      if (headers.length > 0 && headers.some(h => h.length > 0)) {
+        parts.push(`Columns: ${headers.join(' | ')}`);
+        parts.push('');
+        
+        // Data rows - format as "Header: Value" pairs for better semantic search
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+          const row = data[rowIdx];
+          if (!row || row.every((cell: any) => cell === null || cell === undefined || String(cell).trim() === '')) continue;
+          
+          const rowParts: string[] = [];
+          for (let colIdx = 0; colIdx < Math.max(headers.length, row.length); colIdx++) {
+            const header = headers[colIdx] || `Col${colIdx + 1}`;
+            const value = row[colIdx];
+            if (value !== null && value !== undefined && String(value).trim() !== '') {
+              rowParts.push(`${header}: ${String(value).trim()}`);
+            }
+          }
+          
+          if (rowParts.length > 0) {
+            parts.push(`Row ${rowIdx}: ${rowParts.join(', ')}`);
+          }
+        }
+      } else {
+        // No headers — just dump as text
+        for (const row of data) {
+          if (row && row.some((cell: any) => cell !== null && cell !== undefined)) {
+            parts.push(row.map((cell: any) => String(cell ?? '')).join('\t'));
+          }
+        }
+      }
+      
+      parts.push(''); // Blank line between sheets
+    }
+    
+    return parts.join('\n');
+  } catch (error) {
+    console.error(`Failed to extract Excel text from ${filePath}:`, error);
+    return '';
+  }
+}
+
+/**
  * Extract text from a file based on its type
  */
 async function extractFileText(filePath: string, window: BrowserWindow | null): Promise<string> {
@@ -403,6 +588,10 @@ async function extractFileText(filePath: string, window: BrowserWindow | null): 
     
     if (ext === '.doc' || ext === '.docx') {
       return await extractWordText(filePath);
+    }
+    
+    if (ext === '.xlsx' || ext === '.xls') {
+      return extractExcelText(filePath);
     }
     
     // Text files (including .md)
@@ -584,7 +773,19 @@ function sendProgress(window: BrowserWindow, current: number, total: number, fil
 }
 
 /**
- * Index a workspace for RAG
+ * Compute MD5 hash of file content for incremental indexing
+ */
+async function computeFileHash(filePath: string): Promise<string> {
+  try {
+    const content = await fs.readFile(filePath);
+    return crypto.createHash('md5').update(content).digest('hex');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Index a workspace for RAG with incremental indexing and hierarchical chunking
  * @param workspacePath - Path to the workspace to index
  * @param window - BrowserWindow to send progress updates to
  * @param forceReindex - If true, ignore cached embeddings and re-index everything
@@ -597,19 +798,13 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
   }
   
   // Try to load from cache first (unless force re-index)
+  let existingStore: VectorStore | null = null;
   if (!forceReindex) {
     const loaded = await loadVectorStore(workspacePath);
     if (loaded && vectorStore && vectorStore.chunks.length > 0) {
-      // Only use cache if it has actual content
-      console.log(`[RAG] Using cached vector store with ${vectorStore.chunks.length} chunks`);
-      window.webContents.send(IPC_CHANNELS.RAG_INDEX_COMPLETE, {
-        chunksIndexed: vectorStore.chunks.length,
-        filesIndexed: new Set(vectorStore.chunks.map(c => c.filePath)).size,
-        fromCache: true,
-      });
-      return { success: true, chunksIndexed: vectorStore.chunks.length, fromCache: true };
+      existingStore = vectorStore;
+      console.log(`[RAG] Loaded existing vector store with ${vectorStore.chunks.length} chunks for incremental update`);
     } else if (loaded && vectorStore && vectorStore.chunks.length === 0) {
-      // Cache exists but has 0 chunks - discard and re-index
       console.log(`[RAG] Cached vector store has 0 chunks, will re-index`);
       vectorStore = null;
     }
@@ -631,7 +826,68 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
       return { success: true, chunksIndexed: 0 };
     }
     
-    // Phase 1: Extract text and create chunks (without embeddings)
+    // --- Incremental indexing: determine which files changed ---
+    const currentFileSet = new Set(files);
+    const existingMetadata = existingStore?.fileMetadata || {};
+    
+    const filesToReindex: string[] = [];
+    const unchangedFiles: string[] = [];
+    
+    console.log(`[RAG] Scanning ${files.length} files for changes...`);
+    sendProgress(window, 0, files.length, 'Scanning for changes...');
+    
+    for (let i = 0; i < files.length; i++) {
+      const filePath = files[i];
+      const fileName = path.basename(filePath);
+      
+      sendProgress(window, i + 1, files.length, `Scanning: ${fileName}`);
+      
+      const existingMeta = existingMetadata[filePath];
+      if (existingMeta && !forceReindex) {
+        // Check if file content changed using hash
+        const currentHash = await computeFileHash(filePath);
+        if (currentHash && existingMeta.contentHash && currentHash === existingMeta.contentHash) {
+          unchangedFiles.push(filePath);
+          continue;
+        }
+      }
+      
+      filesToReindex.push(filePath);
+    }
+    
+    // Detect deleted files
+    const deletedFiles = Object.keys(existingMetadata).filter(f => !currentFileSet.has(f));
+    
+    console.log(`[RAG] Incremental: ${unchangedFiles.length} unchanged, ${filesToReindex.length} to (re)index, ${deletedFiles.length} deleted`);
+    
+    // If nothing changed, return cached store
+    if (filesToReindex.length === 0 && deletedFiles.length === 0 && existingStore) {
+      console.log(`[RAG] No changes detected, using cached vector store`);
+      window.webContents.send(IPC_CHANNELS.RAG_INDEX_COMPLETE, {
+        chunksIndexed: existingStore.chunks.length,
+        filesIndexed: new Set(existingStore.chunks.map(c => c.filePath)).size,
+        fromCache: true,
+      });
+      isIndexing = false;
+      return { success: true, chunksIndexed: existingStore.chunks.length, fromCache: true };
+    }
+    
+    // Keep chunks from unchanged files
+    let retainedChunks: DocumentChunk[] = [];
+    const retainedMetadata: Record<string, FileMetadata> = {};
+    
+    if (existingStore) {
+      const unchangedSet = new Set(unchangedFiles);
+      retainedChunks = existingStore.chunks.filter(c => unchangedSet.has(c.filePath));
+      for (const filePath of unchangedFiles) {
+        if (existingMetadata[filePath]) {
+          retainedMetadata[filePath] = existingMetadata[filePath];
+        }
+      }
+      console.log(`[RAG] Retained ${retainedChunks.length} chunks from ${unchangedFiles.length} unchanged files`);
+    }
+    
+    // Phase 1: Extract text and create hierarchical chunks for changed files
     interface PendingChunk {
       id: string;
       filePath: string;
@@ -640,17 +896,21 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
       chunkIndex: number;
       totalChunks: number;
       pageNumber?: number;
+      chunkType?: 'parent' | 'child';
+      parentId?: string;
+      sectionHeading?: string;
+      contentHash?: string;
     }
     const pendingChunks: PendingChunk[] = [];
     
-    console.log(`[RAG] Phase 1: Extracting text from ${files.length} files...`);
+    console.log(`[RAG] Phase 1: Extracting text from ${filesToReindex.length} changed files...`);
     
-    for (let i = 0; i < files.length; i++) {
-      const filePath = files[i];
+    for (let i = 0; i < filesToReindex.length; i++) {
+      const filePath = filesToReindex[i];
       const fileName = path.basename(filePath);
       const ext = path.extname(filePath).toLowerCase();
       
-      sendProgress(window, i + 1, files.length, `Extracting: ${fileName}`);
+      sendProgress(window, i + 1, filesToReindex.length, `Extracting: ${fileName}`);
       
       // Extract text
       const text = await extractFileText(filePath, window);
@@ -664,40 +924,31 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
         continue;
       }
       
-      // For PDFs, use page-aware chunking
-      if (ext === '.pdf') {
-        const pdfChunks = chunkPdfText(text);
-        for (let j = 0; j < pdfChunks.length; j++) {
-          pendingChunks.push({
-            id: `${filePath}-${j}`,
-            filePath,
-            fileName,
-            content: pdfChunks[j].text,
-            chunkIndex: j,
-            totalChunks: pdfChunks.length,
-            pageNumber: pdfChunks[j].pageNumber,
-          });
-        }
-      } else {
-        // Regular chunking for non-PDF files
-        const textChunks = chunkText(text);
-        for (let j = 0; j < textChunks.length; j++) {
-          pendingChunks.push({
-            id: `${filePath}-${j}`,
-            filePath,
-            fileName,
-            content: textChunks[j],
-            chunkIndex: j,
-            totalChunks: textChunks.length,
-          });
-        }
+      // Use hierarchical chunking for all file types
+      const hierarchicalChunks = chunkTextHierarchical(text, filePath, fileName);
+      
+      for (let j = 0; j < hierarchicalChunks.length; j++) {
+        const hc = hierarchicalChunks[j];
+        pendingChunks.push({
+          id: `${filePath}-${j}`,
+          filePath,
+          fileName,
+          content: hc.content,
+          chunkIndex: j,
+          totalChunks: hierarchicalChunks.length,
+          pageNumber: hc.pageNumber,
+          chunkType: hc.chunkType,
+          parentId: hc.parentId,
+          sectionHeading: hc.sectionHeading,
+          contentHash: crypto.createHash('md5').update(hc.content).digest('hex'),
+        });
       }
     }
     
-    // Phase 2: Batch embed all chunks
+    // Phase 2: Batch embed new chunks
     console.log(`[RAG] Phase 2: Embedding ${pendingChunks.length} chunks in batches of ${EMBEDDING_BATCH_SIZE}...`);
     
-    const chunks: DocumentChunk[] = [];
+    const newChunks: DocumentChunk[] = [];
     const totalBatches = Math.ceil(pendingChunks.length / EMBEDDING_BATCH_SIZE);
     
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -712,7 +963,7 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
         const embeddings = await getBatchEmbeddings(texts);
         
         for (let i = 0; i < batch.length; i++) {
-          chunks.push({
+          newChunks.push({
             ...batch[i],
             embedding: embeddings[i],
           });
@@ -724,22 +975,26 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
         }
       } catch (error) {
         console.error(`[RAG] Failed to embed batch ${batchIndex + 1}:`, error);
-        // Continue with next batch instead of failing completely
       }
     }
     
-    // Build file metadata for incremental indexing
-    const fileMetadata: Record<string, FileMetadata> = {};
-    for (const filePath of files) {
+    // Merge retained + new chunks
+    const allChunks = [...retainedChunks, ...newChunks];
+    
+    // Build file metadata for incremental indexing (with content hashes)
+    const fileMetadata: Record<string, FileMetadata> = { ...retainedMetadata };
+    for (const filePath of filesToReindex) {
       try {
         const stats = await fs.stat(filePath);
-        const fileChunks = chunks.filter(c => c.filePath === filePath);
+        const contentHash = await computeFileHash(filePath);
+        const fileChunks = newChunks.filter(c => c.filePath === filePath);
         if (fileChunks.length > 0) {
           fileMetadata[filePath] = {
             filePath,
             fileId: filePath,
             lastModified: stats.mtimeMs,
             chunkCount: fileChunks.length,
+            contentHash,
           };
         }
       } catch {}
@@ -748,7 +1003,7 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
     // Store the vector store
     vectorStore = {
       workspacePath,
-      chunks,
+      chunks: allChunks,
       lastUpdated: Date.now(),
       fileMetadata,
     };
@@ -759,17 +1014,17 @@ export async function indexWorkspace(workspacePath: string, window: BrowserWindo
     isIndexing = false;
     
     // Track documents indexed for usage
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < filesToReindex.length; i++) {
       incrementUsage('documents_indexed');
     }
     
     // Send completion
     window.webContents.send(IPC_CHANNELS.RAG_INDEX_COMPLETE, {
-      chunksIndexed: chunks.length,
+      chunksIndexed: allChunks.length,
       filesIndexed: files.length,
     });
     
-    return { success: true, chunksIndexed: chunks.length };
+    return { success: true, chunksIndexed: allChunks.length };
   } catch (error) {
     isIndexing = false;
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -982,6 +1237,7 @@ export async function indexOneDriveWorkspace(
           fileId: file.id,
           lastModified: file.lastModified ? new Date(file.lastModified).getTime() : Date.now(),
           chunkCount: fileChunks.length,
+          contentHash: '', // OneDrive files don't have local content hash
         };
       }
     }
@@ -1051,19 +1307,181 @@ async function extractPdfFromBase64(base64Data: string, window: BrowserWindow, f
 }
 
 /**
- * Search the vector store for relevant chunks using hybrid search (BM25 + vector)
- * Combines semantic similarity with keyword matching for better results
+ * Get Cohere API key from keychain
+ */
+async function getCohereApiKey(): Promise<string | null> {
+  try {
+    const keytar = await import('keytar');
+    return await keytar.default.getPassword('DrasillCloud', 'cohere-api-key');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Set Cohere API key in keychain
+ */
+export async function setCohereApiKey(apiKey: string): Promise<boolean> {
+  try {
+    const keytar = await import('keytar');
+    await keytar.default.setPassword('DrasillCloud', 'cohere-api-key', apiKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get Cohere API key (masked for display)
+ */
+export async function getCohereApiKeyMasked(): Promise<string | null> {
+  const key = await getCohereApiKey();
+  if (!key) return null;
+  return key.slice(0, 8) + '...' + key.slice(-4);
+}
+
+/**
+ * Delete Cohere API key
+ */
+export async function deleteCohereApiKey(): Promise<boolean> {
+  try {
+    const keytar = await import('keytar');
+    return await keytar.default.deletePassword('DrasillCloud', 'cohere-api-key');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * HyDE (Hypothetical Document Embedding) - generate a hypothetical answer
+ * to the query, then embed that answer for better retrieval
+ */
+async function hydeQueryExpansion(query: string): Promise<number[]> {
+  try {
+    const { proxyChatRequest, getSession } = await import('./supabase');
+    const session = await getSession();
+    
+    if (!session) {
+      // Fallback to direct query embedding
+      return await getEmbedding(query);
+    }
+    
+    // Generate hypothetical answer
+    const response = await proxyChatRequest(
+      [
+        { role: 'system', content: 'You are a financial document expert. Given a question, write a short passage (2-3 sentences) that would appear in a document that answers this question. Do not say "here is" or refer to the question. Write as if you are the document itself.' },
+        { role: 'user', content: query },
+      ],
+      {
+        model: 'gpt-4o-mini',
+        max_tokens: 150,
+        temperature: 0.3,
+      }
+    );
+    
+    if (response.success && response.content) {
+      console.log(`[RAG] HyDE generated: "${response.content.slice(0, 100)}..."`);
+      // Embed the hypothetical document + original query combined
+      const hydeText = `${query}\n\n${response.content}`;
+      return await getEmbedding(hydeText);
+    }
+  } catch (error) {
+    console.error('[RAG] HyDE expansion failed, using direct query:', error);
+  }
+  
+  // Fallback to direct query embedding
+  return await getEmbedding(query);
+}
+
+/**
+ * Rerank results using Cohere API for higher precision
+ * Falls back gracefully if no API key or on error
+ */
+async function cohereRerank<T extends { content: string; score: number }>(
+  query: string, 
+  chunks: T[],
+  topN: number
+): Promise<T[]> {
+  const cohereKey = await getCohereApiKey();
+  if (!cohereKey) {
+    console.log('[RAG] No Cohere API key, skipping reranking');
+    return chunks.slice(0, topN);
+  }
+  
+  try {
+    const { CohereClient } = await import('cohere-ai');
+    const cohere = new CohereClient({ token: cohereKey });
+    
+    const documents = chunks.map(c => c.content);
+    
+    const reranked = await cohere.rerank({
+      model: 'rerank-english-v3.0',
+      query,
+      documents,
+      topN: Math.min(topN, chunks.length),
+    });
+    
+    console.log(`[RAG] Cohere reranked ${chunks.length} → ${reranked.results.length} results`);
+    
+    return reranked.results.map(r => ({
+      ...chunks[r.index],
+      score: r.relevanceScore, // Replace with Cohere's relevance score
+    }));
+  } catch (error) {
+    console.error('[RAG] Cohere reranking failed, using original scores:', error);
+    return chunks.slice(0, topN);
+  }
+}
+
+/**
+ * Expand child chunks to their parent chunks for richer context
+ * Carries over the score from the child that triggered the expansion
+ */
+function expandToParentChunks(
+  selectedChunks: Array<DocumentChunk & { score: number }>,
+  allChunks: DocumentChunk[]
+): Array<DocumentChunk & { score: number }> {
+  const result: Array<DocumentChunk & { score: number }> = [];
+  const usedParentIds = new Set<string>();
+  
+  for (const chunk of selectedChunks) {
+    if (chunk.chunkType === 'child' && chunk.parentId) {
+      // Find the parent chunk
+      if (!usedParentIds.has(chunk.parentId)) {
+        const parent = allChunks.find(c => c.id === chunk.parentId && c.chunkType === 'parent');
+        if (parent) {
+          result.push({ ...parent, score: chunk.score });
+          usedParentIds.add(chunk.parentId);
+          continue;
+        }
+      } else {
+        // Already included this parent, skip duplicate
+        continue;
+      }
+    }
+    // Non-child chunks or orphaned children: include as-is
+    result.push(chunk);
+  }
+  
+  return result;
+}
+
+/**
+ * Search the vector store using HyDE + hybrid search (BM25 + vector) + Cohere reranking
+ * With parent chunk expansion for richer context
  * @param query - The search query
  * @param topK - Maximum number of results to return
  * @param dealId - Optional deal ID to prioritize documents associated with this deal
  */
-export async function searchRAG(query: string, topK = 5, dealId?: string): Promise<{ chunks: Array<{ content: string; fileName: string; filePath: string; score: number; chunkIndex: number; totalChunks: number; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; fromOtherDeal?: boolean; dealIds?: string[] }> }> {
+export async function searchRAG(query: string, topK = 5, dealId?: string): Promise<{ chunks: Array<{ content: string; fileName: string; filePath: string; score: number; chunkIndex: number; totalChunks: number; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; fromOtherDeal?: boolean; dealIds?: string[]; sectionHeading?: string }> }> {
   if (!vectorStore || vectorStore.chunks.length === 0) {
     return { chunks: [] };
   }
   
   try {
-    const queryEmbedding = await getEmbedding(query);
+    // HyDE: Generate hypothetical answer embedding for better retrieval
+    console.log(`[RAG] Using HyDE query expansion...`);
+    const queryEmbedding = await hydeQueryExpansion(query);
     const queryTokens = tokenize(query);
     
     // Get deal's associated document paths for filtering
@@ -1074,32 +1492,32 @@ export async function searchRAG(query: string, topK = 5, dealId?: string): Promi
       console.log(`[RAG] Deal-scoped search: ${dealDocPaths.size} associated document paths for deal ${dealId}`);
     }
     
+    // Search only child chunks (more precise) for initial retrieval
+    const searchableChunks = vectorStore.chunks.filter(c => c.chunkType !== 'parent');
+    
     // Pre-compute document frequencies for BM25
     const docFrequencies = new Map<string, number>();
     const allDocTokens: string[][] = [];
     let totalLength = 0;
     
-    for (const chunk of vectorStore.chunks) {
+    for (const chunk of searchableChunks) {
       const tokens = tokenize(chunk.content);
       allDocTokens.push(tokens);
       totalLength += tokens.length;
       
-      // Count unique terms per document
       const uniqueTerms = new Set(tokens);
       for (const term of uniqueTerms) {
         docFrequencies.set(term, (docFrequencies.get(term) || 0) + 1);
       }
     }
     
-    const avgDocLength = totalLength / vectorStore.chunks.length;
-    const totalDocs = vectorStore.chunks.length;
+    const avgDocLength = searchableChunks.length > 0 ? totalLength / searchableChunks.length : 1;
+    const totalDocs = searchableChunks.length;
     
-    // Calculate hybrid scores for all chunks
-    const scored = vectorStore.chunks.map((chunk, index) => {
-      // Vector similarity (cosine)
+    // Calculate hybrid scores
+    const scored = searchableChunks.map((chunk, index) => {
       const vectorScore = cosineSimilarity(queryEmbedding, chunk.embedding);
       
-      // BM25 score
       const bm25Score = calculateBM25(
         queryTokens,
         allDocTokens[index],
@@ -1108,13 +1526,9 @@ export async function searchRAG(query: string, topK = 5, dealId?: string): Promi
         totalDocs
       );
       
-      // Normalize BM25 score (typical range 0-20, normalize to 0-1)
       const normalizedBM25 = Math.min(bm25Score / 10, 1);
-      
-      // Combine scores with weights
       const hybridScore = (VECTOR_WEIGHT * vectorScore) + (BM25_WEIGHT * normalizedBM25);
       
-      // Check deal association
       const chunkDealIds = getDealsForDocument(chunk.filePath);
       const fromOtherDeal = dealId ? !chunkDealIds.includes(dealId) && !isPathUnderDealFolder(chunk.filePath, dealDocPaths) : false;
       
@@ -1128,37 +1542,52 @@ export async function searchRAG(query: string, topK = 5, dealId?: string): Promi
       };
     });
     
-    // Sort: prioritize current deal's documents, then by score
+    // Sort by score first
     scored.sort((a, b) => {
       if (dealId) {
-        // Current deal documents come first
         if (!a.fromOtherDeal && b.fromOtherDeal) return -1;
         if (a.fromOtherDeal && !b.fromOtherDeal) return 1;
       }
       return b.score - a.score;
     });
     
-    // Apply relevance threshold and take top K
-    const relevantChunks = scored.filter(c => c.score >= MIN_RELEVANCE_THRESHOLD);
+    // Take top candidates for reranking (wider pool than final topK)
+    const rerankPool = scored.filter(c => c.score >= MIN_RELEVANCE_THRESHOLD).slice(0, Math.max(topK * 4, 20));
     
-    // If deal-scoped and we have few results from current deal, include some from other deals
-    let topChunks: typeof relevantChunks;
+    // Cohere reranking for precision
+    let reranked: typeof scored;
+    if (rerankPool.length > 0) {
+      reranked = await cohereRerank(query, rerankPool, topK);
+    } else {
+      reranked = [];
+    }
+    
+    // Expand child chunks to parent chunks for richer context
+    const expanded = expandToParentChunks(reranked, vectorStore.chunks);
+    
+    // Apply deal-scoping
+    let topChunks: typeof expanded;
     if (dealId) {
-      const currentDealChunks = relevantChunks.filter(c => !c.fromOtherDeal);
-      const otherDealChunks = relevantChunks.filter(c => c.fromOtherDeal);
+      const currentDealChunks = expanded.filter(c => {
+        const chunkDealIds = getDealsForDocument(c.filePath);
+        return chunkDealIds.includes(dealId) || isPathUnderDealFolder(c.filePath, dealDocPaths);
+      });
+      const otherDealChunks = expanded.filter(c => {
+        const chunkDealIds = getDealsForDocument(c.filePath);
+        return !chunkDealIds.includes(dealId) && !isPathUnderDealFolder(c.filePath, dealDocPaths);
+      });
       
       if (currentDealChunks.length >= topK) {
         topChunks = currentDealChunks.slice(0, topK);
       } else {
-        // Fill with other deal chunks if needed
         const needed = topK - currentDealChunks.length;
         topChunks = [...currentDealChunks, ...otherDealChunks.slice(0, needed)];
       }
     } else {
-      topChunks = relevantChunks.slice(0, Math.max(topK, 3));
+      topChunks = expanded.slice(0, Math.max(topK, 3));
     }
     
-    console.log(`[RAG] Hybrid search: ${relevantChunks.length} relevant results (threshold: ${MIN_RELEVANCE_THRESHOLD}), returning top ${topChunks.length}${dealId ? ` (${topChunks.filter(c => !c.fromOtherDeal).length} from current deal)` : ''}`);
+    console.log(`[RAG] Search complete: ${rerankPool.length} candidates → ${reranked.length} reranked → ${topChunks.length} returned${dealId ? ` (deal-scoped)` : ''}`);
     
     return {
       chunks: topChunks.map(c => ({
@@ -1171,8 +1600,9 @@ export async function searchRAG(query: string, topK = 5, dealId?: string): Promi
         pageNumber: c.pageNumber,
         source: c.source,
         oneDriveId: c.oneDriveId,
-        fromOtherDeal: c.fromOtherDeal,
-        dealIds: c.dealIds,
+        fromOtherDeal: !!(dealId && getDealsForDocument(c.filePath).length > 0 && !getDealsForDocument(c.filePath).includes(dealId)),
+        dealIds: getDealsForDocument(c.filePath),
+        sectionHeading: c.sectionHeading,
       })),
     };
   } catch (error) {
@@ -1223,12 +1653,17 @@ export async function getRAGContext(query: string, dealId?: string): Promise<{ c
   // Use a numbered reference format that the AI can cite
   const sources: Array<{ fileName: string; filePath: string; section: string; pageNumber?: number; source?: 'local' | 'onedrive'; oneDriveId?: string; relevanceScore?: number; fromOtherDeal?: boolean; dealId?: string }> = [];
   const contextParts = filteredChunks.map((chunk, index) => {
-    // For PDFs with page numbers, include the page
-    const sectionLabel = chunk.pageNumber 
-      ? `Page ${chunk.pageNumber}`
-      : chunk.totalChunks > 1 
-        ? `Section ${chunk.chunkIndex + 1}/${chunk.totalChunks}`
-        : 'Full Document';
+    // Build section label with heading context
+    let sectionLabel: string;
+    if (chunk.pageNumber) {
+      sectionLabel = `Page ${chunk.pageNumber}`;
+    } else if (chunk.sectionHeading) {
+      sectionLabel = chunk.sectionHeading;
+    } else if (chunk.totalChunks > 1) {
+      sectionLabel = `Section ${chunk.chunkIndex + 1}/${chunk.totalChunks}`;
+    } else {
+      sectionLabel = 'Full Document';
+    }
     
     // Add label for sources from other deals
     const otherDealLabel = chunk.fromOtherDeal ? ' [FROM OTHER DEAL]' : '';

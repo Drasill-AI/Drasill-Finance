@@ -28,6 +28,7 @@ export function DealModal() {
     setEditingDeal,
     showToast,
     loadDeals,
+    openBankStatementImport,
   } = useAppStore();
 
   const isEditMode = !!editingDeal;
@@ -193,6 +194,25 @@ export function DealModal() {
             {isCloneMode ? 'Clone Deal' : (isEditMode ? 'Edit Deal' : 'Add New Deal')}
           </span>
           <div className={styles.headerActions}>
+            {isEditMode && !isCloneMode && (
+              <button 
+                className={styles.generateDocButton}
+                onClick={() => {
+                  if (editingDeal?.id) {
+                    openBankStatementImport(editingDeal.id, editingDeal.borrowerName || 'Deal');
+                  }
+                }}
+                title="Import Bank Statements"
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="3" width="20" height="18" rx="2" />
+                  <line x1="2" y1="9" x2="22" y2="9" />
+                  <line x1="12" y1="15" x2="12" y2="21" />
+                  <polyline points="8 18 12 14 16 18" />
+                </svg>
+              </button>
+            )}
             {isEditMode && !isCloneMode && (
               <button 
                 className={styles.generateDocButton}

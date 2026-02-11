@@ -17,6 +17,7 @@ import type {
   ChatMessage,
   ChatSessionSource,
   ActivitySource,
+  KnowledgeProfile,
 } from '@drasill/shared';
 
 interface ElectronAPI {
@@ -151,6 +152,46 @@ interface ElectronAPI {
   authResetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   authGetCurrentUser: () => Promise<{ user: any; session: any } | null>;
   authCheckSubscription: () => Promise<{ hasActiveSubscription: boolean; subscription: any; error?: string }>;
+  // HubSpot CRM API
+  startHubSpotAuth: () => Promise<{ success: boolean; error?: string }>;
+  getHubSpotAuthStatus: () => Promise<{ connected: boolean; email?: string; portalId?: string }>;
+  logoutHubSpot: () => Promise<boolean>;
+  getHubSpotDeals: (options?: { limit?: number; after?: string; properties?: string[] }) => Promise<any>;
+  getHubSpotDeal: (dealId: string, properties?: string[]) => Promise<any>;
+  searchHubSpotDeals: (query: any) => Promise<any>;
+  getHubSpotContacts: (options?: { limit?: number; after?: string; properties?: string[] }) => Promise<any>;
+  getHubSpotContact: (contactId: string, properties?: string[]) => Promise<any>;
+  getHubSpotCompanies: (options?: { limit?: number; after?: string; properties?: string[] }) => Promise<any>;
+  getHubSpotCompany: (companyId: string, properties?: string[]) => Promise<any>;
+  getHubSpotOwners: (options?: { limit?: number; after?: string }) => Promise<any>;
+  getHubSpotPipelines: () => Promise<any>;
+  getHubSpotDealsSummary: () => Promise<any>;
+  // Cohere API Key Management
+  setCohereApiKey: (apiKey: string) => Promise<boolean>;
+  getCohereApiKey: () => Promise<string | null>;
+  deleteCohereApiKey: () => Promise<boolean>;
+  // Knowledge Profiles API
+  knowledgeProfileGetAll: () => Promise<KnowledgeProfile[]>;
+  knowledgeProfileGet: (id: string) => Promise<KnowledgeProfile | null>;
+  knowledgeProfileCreate: (profile: Omit<KnowledgeProfile, 'id' | 'createdAt' | 'updatedAt'>) => Promise<KnowledgeProfile>;
+  knowledgeProfileUpdate: (id: string, data: Partial<KnowledgeProfile>) => Promise<KnowledgeProfile | null>;
+  knowledgeProfileDelete: (id: string) => Promise<boolean>;
+  knowledgeProfileSetActive: (id: string | null) => Promise<boolean>;
+  knowledgeProfileGetActive: () => Promise<KnowledgeProfile | null>;
+  knowledgeDocAdd: (profileId: string, doc: any) => Promise<any>;
+  knowledgeDocRemove: (docId: string) => Promise<boolean>;
+  knowledgeDocGetByProfile: (profileId: string) => Promise<any[]>;
+  // Bank Statement API
+  bankSelectFile: () => Promise<{ filePath: string; fileName: string; fileType: string } | null>;
+  bankParseCSV: (filePath: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+  bankParsePDF: (text: string, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+  bankImportStatement: (dealId: string, filePath: string, fileName: string, parsedData: any) => Promise<{ success: boolean; accountId?: string; statementId?: string; transactionCount?: number; error?: string }>;
+  bankGetAccounts: (dealId: string) => Promise<any[]>;
+  bankGetStatements: (dealId: string) => Promise<any[]>;
+  bankGetTransactions: (statementId: string) => Promise<any[]>;
+  bankDeleteAccount: (accountId: string) => Promise<boolean>;
+  bankDeleteStatement: (statementId: string) => Promise<boolean>;
+  bankUpdateStatus: (statementId: string, status: string) => Promise<boolean>;
 }
 
 declare global {

@@ -205,6 +205,10 @@ export const IPC_CHANNELS = {
   HUBSPOT_GET_OWNERS: 'hubspot-get-owners',
   HUBSPOT_GET_PIPELINES: 'hubspot-get-pipelines',
   HUBSPOT_GET_DEALS_SUMMARY: 'hubspot-get-deals-summary',
+  // Cohere API Key
+  COHERE_SET_API_KEY: 'cohere-set-api-key',
+  COHERE_GET_API_KEY: 'cohere-get-api-key',
+  COHERE_DELETE_API_KEY: 'cohere-delete-api-key',
   // Chat History
   CHAT_SESSION_CREATE: 'chat-session-create',
   CHAT_SESSION_UPDATE: 'chat-session-update',
@@ -236,6 +240,17 @@ export const IPC_CHANNELS = {
   MEMO_UPDATE: 'memo-update',
   MEMO_DELETE: 'memo-delete',
   MEMO_EXPORT: 'memo-export',
+  // Bank Statement Analysis
+  BANK_IMPORT_STATEMENT: 'bank-import-statement',
+  BANK_PARSE_CSV: 'bank-parse-csv',
+  BANK_PARSE_PDF: 'bank-parse-pdf',
+  BANK_GET_ACCOUNTS: 'bank-get-accounts',
+  BANK_GET_STATEMENTS: 'bank-get-statements',
+  BANK_GET_TRANSACTIONS: 'bank-get-transactions',
+  BANK_DELETE_ACCOUNT: 'bank-delete-account',
+  BANK_DELETE_STATEMENT: 'bank-delete-statement',
+  BANK_UPDATE_STATUS: 'bank-update-status',
+  BANK_SELECT_FILE: 'bank-select-file',
 } as const;
 
 /**
@@ -369,6 +384,8 @@ export const DOCUMENT_EXTENSIONS = [
   '.pdf',
   '.doc',
   '.docx',
+  '.xlsx',
+  '.xls',
 ];
 
 /**
