@@ -1425,7 +1425,8 @@ async function cohereRerank<T extends { content: string; score: number }>(
     
     return reranked.results.map(r => ({
       ...chunks[r.index],
-      score: r.relevanceScore, // Replace with Cohere's relevance score
+      score: Math.max(chunks[r.index].score, r.relevanceScore), // Keep higher score to avoid threshold filtering
+      cohereScore: r.relevanceScore, // Preserve Cohere score for debugging
     }));
   } catch (error) {
     console.error('[RAG] Cohere reranking failed, using original scores:', error);
