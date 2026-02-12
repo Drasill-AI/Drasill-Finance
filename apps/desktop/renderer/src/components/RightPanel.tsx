@@ -278,6 +278,7 @@ export function RightPanel() {
     chatMessages,
     isChatLoading,
     chatError,
+    toolProgressSteps,
     sendMessage,
     clearChat,
     cancelChat,
@@ -1062,7 +1063,25 @@ export function RightPanel() {
                       msg.content
                     )
                   ) : (isChatLoading && msg.role === 'assistant' ? (
-                    <span className={styles.typing}>Thinking...</span>
+                    <div className={styles.thinkingStepper}>
+                      {toolProgressSteps.length === 0 ? (
+                        <div className={styles.thinkingStep}>
+                          <span className={styles.stepSpinner} />
+                          <span className={styles.stepLabel}>Thinking…</span>
+                        </div>
+                      ) : (
+                        toolProgressSteps.map((step, i) => (
+                          <div key={i} className={`${styles.thinkingStep} ${step.status === 'completed' ? styles.stepCompleted : styles.stepActive}`}>
+                            {step.status === 'completed' ? (
+                              <span className={styles.stepCheck}>✓</span>
+                            ) : (
+                              <span className={styles.stepSpinner} />
+                            )}
+                            <span className={styles.stepLabel}>{step.label}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   ) : null)}
                 </div>
                 {msg.role === 'assistant' && msg.ragSources && msg.ragSources.length > 0 && (

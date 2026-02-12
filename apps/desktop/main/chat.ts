@@ -6,6 +6,36 @@ import { proxyChatRequest, getSession } from './supabase';
 import { incrementUsage } from './usage';
 import { getActiveProfileWithInheritance } from './database';
 
+/** Human-friendly labels for each chat tool, shown in the thinking UI */
+const TOOL_LABELS: Record<string, string> = {
+  get_deals: '📋 Looking up deals…',
+  find_deal_by_name: '🔍 Searching deals…',
+  get_deal_details: '📄 Fetching deal details…',
+  add_deal_activity: '📝 Logging activity…',
+  update_deal_stage: '🔄 Updating deal stage…',
+  update_deal: '✏️ Updating deal…',
+  create_deal: '➕ Creating deal…',
+  delete_deal: '🗑️ Deleting deal…',
+  update_activity: '✏️ Updating activity…',
+  delete_activity: '🗑️ Removing activity…',
+  get_pipeline_analytics: '📊 Analyzing pipeline…',
+  get_deal_activities: '📋 Fetching activities…',
+  retrieve_schematic: '🔧 Looking up schematic…',
+  draft_email: '✉️ Drafting email…',
+  export_deal_pdf: '📄 Exporting PDF…',
+  search_deal_files: '📂 Searching files…',
+  manage_memos: '📝 Managing memos…',
+  get_hubspot_deals: '🔗 Fetching HubSpot deals…',
+  get_hubspot_deal_details: '🔗 Fetching HubSpot deal…',
+  get_hubspot_pipeline_summary: '🔗 Analyzing HubSpot pipeline…',
+  get_hubspot_contacts: '🔗 Fetching contacts…',
+  get_hubspot_companies: '🔗 Fetching companies…',
+  get_balance_summary: '📊 Analyzing balances…',
+  get_cashflow_by_period: '📊 Analyzing cashflow…',
+  detect_seasonality: '📊 Detecting seasonality…',
+  query_transactions: '🔍 Searching transactions…',
+};
+
 let abortController: AbortController | null = null;
 
 /**
@@ -321,7 +351,22 @@ export async function sendChatMessage(
             console.error('Failed to parse tool arguments:', e);
           }
           
+          // Emit tool progress: started
+          const toolLabel = TOOL_LABELS[toolCall.function.name] || `⚙️ Running ${toolCall.function.name}…`;
+          window.webContents.send(IPC_CHANNELS.CHAT_TOOL_PROGRESS, {
+            toolName: toolCall.function.name,
+            status: 'started',
+            label: toolLabel,
+          });
+          
           const result = await executeTool(toolCall.function.name, args, toolContext);
+          
+          // Emit tool progress: completed
+          window.webContents.send(IPC_CHANNELS.CHAT_TOOL_PROGRESS, {
+            toolName: toolCall.function.name,
+            status: 'completed',
+            label: toolLabel,
+          });
           
           // Notify renderer if action was taken
           if (result.actionTaken) {

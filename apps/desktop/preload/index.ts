@@ -1071,6 +1071,13 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.SELECT_FILES, options);
   },
 
+  // Chat Tool Progress
+  onChatToolProgress: (callback: (data: { toolName: string; status: 'started' | 'completed'; label: string }) => void): (() => void) => {
+    const handler = (_event: any, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CHAT_TOOL_PROGRESS, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.CHAT_TOOL_PROGRESS, handler);
+  },
+
   // Bank Statement Analysis
   bankSelectFile: (): Promise<{ filePath: string; fileName: string; fileType: string } | null> => {
     return ipcRenderer.invoke(IPC_CHANNELS.BANK_SELECT_FILE);

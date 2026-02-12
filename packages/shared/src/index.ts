@@ -251,6 +251,8 @@ export const IPC_CHANNELS = {
   BANK_DELETE_STATEMENT: 'bank-delete-statement',
   BANK_UPDATE_STATUS: 'bank-update-status',
   BANK_SELECT_FILE: 'bank-select-file',
+  // Chat Tool Progress
+  CHAT_TOOL_PROGRESS: 'chat-tool-progress',
 } as const;
 
 /**

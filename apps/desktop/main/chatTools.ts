@@ -7,13 +7,21 @@ import type { Deal, DealActivity, DealStage, SchematicToolCall } from '@drasill/
 import {
   getAllDeals,
   getDeal,
+  createDeal,
   updateDeal,
+  deleteDeal,
   createDealActivity,
   getAllActivities,
   getActivitiesForDeal,
+  getDealActivity,
+  updateDealActivity,
+  deleteDealActivity,
   calculatePipelineAnalytics,
   addActivitySource,
   getRelevanceThresholds,
+  getDealDocuments,
+  getAllDocumentTemplates,
+  getMemosByDeal,
   getBankAccountsByDeal,
   getStatementsByDeal,
   getMonthlyBalanceSummary,
@@ -459,6 +467,239 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+
+  // ======== New Platform Tools ========
+
+  // Create Deal
+  {
+    type: 'function',
+    function: {
+      name: 'create_deal',
+      description: 'Create a new deal in the pipeline. Use this when the user asks to add or create a new deal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          borrower_name: {
+            type: 'string',
+            description: 'The borrower / applicant name for the deal.',
+          },
+          loan_amount: {
+            type: 'number',
+            description: 'Requested loan amount in dollars.',
+          },
+          stage: {
+            type: 'string',
+            enum: ['lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined'],
+            description: 'Initial pipeline stage. Default is "lead".',
+          },
+          priority: {
+            type: 'string',
+            enum: ['low', 'medium', 'high'],
+            description: 'Deal priority. Default is "medium".',
+          },
+          borrower_contact: {
+            type: 'string',
+            description: 'Contact info for the borrower (email, phone, etc.).',
+          },
+          interest_rate: {
+            type: 'number',
+            description: 'Interest rate as a percentage (e.g. 7.5).',
+          },
+          term_months: {
+            type: 'number',
+            description: 'Loan term in months.',
+          },
+          collateral_description: {
+            type: 'string',
+            description: 'Description of collateral securing the loan.',
+          },
+          notes: {
+            type: 'string',
+            description: 'Additional notes for the deal.',
+          },
+        },
+        required: ['borrower_name'],
+      },
+    },
+  },
+
+  // Update Deal (general fields)
+  {
+    type: 'function',
+    function: {
+      name: 'update_deal',
+      description: 'Update any fields on an existing deal. Use this instead of update_deal_stage when changing non-stage fields or multiple fields at once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to update. Use find_deal_by_name first if you only have the name.',
+          },
+          borrower_name: { type: 'string', description: 'New borrower name.' },
+          borrower_contact: { type: 'string', description: 'New borrower contact info.' },
+          loan_amount: { type: 'number', description: 'New loan amount.' },
+          interest_rate: { type: 'number', description: 'New interest rate.' },
+          term_months: { type: 'number', description: 'New term in months.' },
+          collateral_description: { type: 'string', description: 'New collateral description.' },
+          stage: {
+            type: 'string',
+            enum: ['lead', 'application', 'underwriting', 'approved', 'funded', 'closed', 'declined'],
+            description: 'New pipeline stage.',
+          },
+          priority: {
+            type: 'string',
+            enum: ['low', 'medium', 'high'],
+            description: 'New priority.',
+          },
+          assigned_to: { type: 'string', description: 'Person assigned to the deal.' },
+          notes: { type: 'string', description: 'Updated notes.' },
+          expected_close_date: { type: 'string', description: 'Expected close date in YYYY-MM-DD format.' },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+
+  // Delete Deal (requires confirmation)
+  {
+    type: 'function',
+    function: {
+      name: 'delete_deal',
+      description: 'Delete a deal from the pipeline. This is destructive and will ask the user to confirm before executing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to delete.',
+          },
+          confirmed: {
+            type: 'boolean',
+            description: 'Whether the user has confirmed the deletion. Must be true to proceed.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+
+  // Update Activity
+  {
+    type: 'function',
+    function: {
+      name: 'update_activity',
+      description: 'Update an existing deal activity (note, call, email, etc.).',
+      parameters: {
+        type: 'object',
+        properties: {
+          activity_id: {
+            type: 'string',
+            description: 'The activity ID to update.',
+          },
+          type: {
+            type: 'string',
+            enum: ['note', 'call', 'email', 'meeting', 'document', 'status_change', 'ai_analysis'],
+            description: 'New activity type.',
+          },
+          description: {
+            type: 'string',
+            description: 'New activity description.',
+          },
+          performed_by: {
+            type: 'string',
+            description: 'Who performed the activity.',
+          },
+        },
+        required: ['activity_id'],
+      },
+    },
+  },
+
+  // Delete Activity (requires confirmation)
+  {
+    type: 'function',
+    function: {
+      name: 'delete_activity',
+      description: 'Delete a deal activity. This is destructive and will ask the user to confirm before executing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          activity_id: {
+            type: 'string',
+            description: 'The activity ID to delete.',
+          },
+          confirmed: {
+            type: 'boolean',
+            description: 'Whether the user has confirmed the deletion. Must be true to proceed.',
+          },
+        },
+        required: ['activity_id'],
+      },
+    },
+  },
+
+  // Export Deal PDF
+  {
+    type: 'function',
+    function: {
+      name: 'export_deal_pdf',
+      description: 'Export a deal report to PDF. Triggers the PDF export dialog for the specified deal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to export.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+
+  // Search / List Files for a deal
+  {
+    type: 'function',
+    function: {
+      name: 'search_deal_files',
+      description: 'List documents associated with a deal. Use this when the user asks about files, documents, or attachments for a deal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID to list files for.',
+          },
+        },
+        required: ['deal_id'],
+      },
+    },
+  },
+
+  // Generate / List Memo Templates
+  {
+    type: 'function',
+    function: {
+      name: 'manage_memos',
+      description: 'List available memo templates, list existing memos for a deal, or get details about a specific template. Use "list_templates" to show available templates, "list_memos" to show generated memos for a deal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list_templates', 'list_memos'],
+            description: 'The action to perform.',
+          },
+          deal_id: {
+            type: 'string',
+            description: 'The deal ID (required for list_memos).',
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -650,6 +891,31 @@ export async function executeTool(
 
       case 'query_transactions':
         return executeQueryTransactions(args);
+
+      // New platform tools
+      case 'create_deal':
+        return executeCreateDeal(args);
+
+      case 'update_deal':
+        return executeUpdateDealFull(args);
+
+      case 'delete_deal':
+        return executeDeleteDeal(args);
+
+      case 'update_activity':
+        return executeUpdateActivity(args);
+
+      case 'delete_activity':
+        return executeDeleteActivity(args);
+
+      case 'export_deal_pdf':
+        return executeExportDealPdf(args);
+
+      case 'search_deal_files':
+        return executeSearchDealFiles(args);
+
+      case 'manage_memos':
+        return executeManageMemos(args);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -1648,4 +1914,335 @@ function executeQueryTransactions(args: Record<string, unknown>): ToolResult {
     },
     message: `Found ${transactions.length} transactions for ${deal.borrowerName}${keyword ? ` matching "${keyword}"` : ''}. Total debits: $${Math.round(totalDebits).toLocaleString()}, Total credits: $${Math.round(totalCredits).toLocaleString()}. Based on ${sourceInfo.statementCount} bank statements.`,
   };
+}
+
+// ============ New Platform Tool Implementations ============
+
+function executeCreateDeal(args: Record<string, unknown>): ToolResult {
+  const borrowerName = args.borrower_name as string;
+  if (!borrowerName) {
+    return { success: false, error: 'Borrower name is required to create a deal.' };
+  }
+
+  const deal = createDeal({
+    borrowerName,
+    loanAmount: args.loan_amount as number | undefined,
+    stage: (args.stage as any) || 'lead',
+    priority: (args.priority as any) || 'medium',
+    borrowerContact: args.borrower_contact as string | undefined,
+    interestRate: args.interest_rate as number | undefined,
+    termMonths: args.term_months as number | undefined,
+    collateralDescription: args.collateral_description as string | undefined,
+    notes: args.notes as string | undefined,
+  });
+
+  return {
+    success: true,
+    data: {
+      id: deal.id,
+      dealNumber: deal.dealNumber,
+      borrowerName: deal.borrowerName,
+      loanAmount: deal.loanAmount,
+      stage: deal.stage,
+      priority: deal.priority,
+    },
+    message: `Created deal ${deal.dealNumber} for ${deal.borrowerName} (${deal.stage} stage, $${(deal.loanAmount || 0).toLocaleString()}).`,
+    actionTaken: 'deal_created',
+  };
+}
+
+function executeUpdateDealFull(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  if (!dealId) {
+    return { success: false, error: 'Deal ID is required.' };
+  }
+
+  const existing = getDeal(dealId);
+  if (!existing) {
+    return { success: false, error: `Deal ${dealId} not found.` };
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (args.borrower_name !== undefined) updates.borrowerName = args.borrower_name;
+  if (args.borrower_contact !== undefined) updates.borrowerContact = args.borrower_contact;
+  if (args.loan_amount !== undefined) updates.loanAmount = args.loan_amount;
+  if (args.interest_rate !== undefined) updates.interestRate = args.interest_rate;
+  if (args.term_months !== undefined) updates.termMonths = args.term_months;
+  if (args.collateral_description !== undefined) updates.collateralDescription = args.collateral_description;
+  if (args.stage !== undefined) updates.stage = args.stage;
+  if (args.priority !== undefined) updates.priority = args.priority;
+  if (args.assigned_to !== undefined) updates.assignedTo = args.assigned_to;
+  if (args.notes !== undefined) updates.notes = args.notes;
+  if (args.expected_close_date !== undefined) updates.expectedCloseDate = args.expected_close_date;
+
+  const changed = Object.keys(updates);
+  if (changed.length === 0) {
+    return { success: false, error: 'No fields provided to update.' };
+  }
+
+  const updated = updateDeal(dealId, updates as any);
+  if (!updated) {
+    return { success: false, error: 'Failed to update deal.' };
+  }
+
+  return {
+    success: true,
+    data: {
+      id: updated.id,
+      dealNumber: updated.dealNumber,
+      borrowerName: updated.borrowerName,
+      loanAmount: updated.loanAmount,
+      stage: updated.stage,
+      priority: updated.priority,
+      fieldsUpdated: changed,
+    },
+    message: `Updated ${changed.join(', ')} on deal ${updated.dealNumber} (${updated.borrowerName}).`,
+    actionTaken: 'deal_updated',
+  };
+}
+
+function executeDeleteDeal(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  const confirmed = args.confirmed === true;
+
+  if (!dealId) {
+    return { success: false, error: 'Deal ID is required.' };
+  }
+
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal ${dealId} not found.` };
+  }
+
+  if (!confirmed) {
+    return {
+      success: true,
+      requiresConfirmation: true,
+      data: {
+        id: deal.id,
+        dealNumber: deal.dealNumber,
+        borrowerName: deal.borrowerName,
+        loanAmount: deal.loanAmount,
+        stage: deal.stage,
+      },
+      message: `⚠️ Are you sure you want to delete deal ${deal.dealNumber} (${deal.borrowerName}, $${(deal.loanAmount || 0).toLocaleString()})? This action cannot be undone. Please confirm to proceed.`,
+    };
+  }
+
+  const deleted = deleteDeal(dealId);
+  if (!deleted) {
+    return { success: false, error: 'Failed to delete the deal.' };
+  }
+
+  return {
+    success: true,
+    data: { dealNumber: deal.dealNumber, borrowerName: deal.borrowerName },
+    message: `Deleted deal ${deal.dealNumber} (${deal.borrowerName}).`,
+    actionTaken: 'deal_deleted',
+  };
+}
+
+function executeUpdateActivity(args: Record<string, unknown>): ToolResult {
+  const activityId = args.activity_id as string;
+  if (!activityId) {
+    return { success: false, error: 'Activity ID is required.' };
+  }
+
+  const existing = getDealActivity(activityId);
+  if (!existing) {
+    return { success: false, error: `Activity ${activityId} not found.` };
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (args.type !== undefined) updates.type = args.type;
+  if (args.description !== undefined) updates.description = args.description;
+  if (args.performed_by !== undefined) updates.performedBy = args.performed_by;
+
+  const changed = Object.keys(updates);
+  if (changed.length === 0) {
+    return { success: false, error: 'No fields provided to update.' };
+  }
+
+  const updated = updateDealActivity(activityId, updates as any);
+  if (!updated) {
+    return { success: false, error: 'Failed to update activity.' };
+  }
+
+  return {
+    success: true,
+    data: {
+      id: updated.id,
+      dealId: updated.dealId,
+      type: updated.type,
+      description: updated.description,
+      fieldsUpdated: changed,
+    },
+    message: `Updated activity: ${updated.type} — ${updated.description?.slice(0, 80) || '(no description)'}`,
+    actionTaken: 'activity_updated',
+  };
+}
+
+function executeDeleteActivity(args: Record<string, unknown>): ToolResult {
+  const activityId = args.activity_id as string;
+  const confirmed = args.confirmed === true;
+
+  if (!activityId) {
+    return { success: false, error: 'Activity ID is required.' };
+  }
+
+  const existing = getDealActivity(activityId);
+  if (!existing) {
+    return { success: false, error: `Activity ${activityId} not found.` };
+  }
+
+  if (!confirmed) {
+    return {
+      success: true,
+      requiresConfirmation: true,
+      data: {
+        id: existing.id,
+        type: existing.type,
+        description: existing.description?.slice(0, 120),
+        dealId: existing.dealId,
+      },
+      message: `⚠️ Are you sure you want to delete this ${existing.type} activity? "${existing.description?.slice(0, 80) || '(no description)'}" — This cannot be undone. Please confirm to proceed.`,
+    };
+  }
+
+  const deleted = deleteDealActivity(activityId);
+  if (!deleted) {
+    return { success: false, error: 'Failed to delete activity.' };
+  }
+
+  return {
+    success: true,
+    data: { type: existing.type, description: existing.description?.slice(0, 80) },
+    message: `Deleted ${existing.type} activity.`,
+    actionTaken: 'activity_deleted',
+  };
+}
+
+function executeExportDealPdf(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  if (!dealId) {
+    return { success: false, error: 'Deal ID is required.' };
+  }
+
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal ${dealId} not found.` };
+  }
+
+  // The actual PDF generation requires BrowserWindow — we signal the renderer to trigger it
+  return {
+    success: true,
+    data: { dealId: deal.id, dealNumber: deal.dealNumber, borrowerName: deal.borrowerName },
+    message: `Opening PDF export for deal ${deal.dealNumber} (${deal.borrowerName})…`,
+    actionTaken: 'export_deal_pdf',
+  };
+}
+
+function executeSearchDealFiles(args: Record<string, unknown>): ToolResult {
+  const dealId = args.deal_id as string;
+  if (!dealId) {
+    return { success: false, error: 'Deal ID is required.' };
+  }
+
+  const deal = getDeal(dealId);
+  if (!deal) {
+    return { success: false, error: `Deal ${dealId} not found.` };
+  }
+
+  const docs = getDealDocuments(dealId);
+  if (docs.length === 0) {
+    return {
+      success: true,
+      data: { dealName: deal.borrowerName, documents: [] },
+      message: `No documents are associated with ${deal.borrowerName}. Try indexing a folder first.`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      documentCount: docs.length,
+      documents: docs.map(d => ({
+        id: d.id,
+        fileName: d.fileName,
+        filePath: d.filePath,
+        autoDetected: d.autoDetected,
+        addedAt: d.createdAt,
+      })),
+    },
+    message: `Found ${docs.length} document(s) associated with ${deal.borrowerName}.`,
+  };
+}
+
+function executeManageMemos(args: Record<string, unknown>): ToolResult {
+  const action = args.action as string;
+  const dealId = args.deal_id as string | undefined;
+
+  if (action === 'list_templates') {
+    const templates = getAllDocumentTemplates();
+    if (templates.length === 0) {
+      return {
+        success: true,
+        data: { templates: [] },
+        message: 'No memo templates have been created yet. Create a template in the Templates section first.',
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        templates: templates.map(t => ({
+          id: t.id,
+          name: t.name,
+          type: t.templateType,
+          isActive: t.isActive,
+          requiredSections: t.requiredSections,
+        })),
+      },
+      message: `Found ${templates.length} template(s): ${templates.map(t => t.name).join(', ')}.`,
+    };
+  }
+
+  if (action === 'list_memos') {
+    if (!dealId) {
+      return { success: false, error: 'deal_id is required for list_memos action.' };
+    }
+
+    const deal = getDeal(dealId);
+    if (!deal) {
+      return { success: false, error: `Deal ${dealId} not found.` };
+    }
+
+    const memos = getMemosByDeal(dealId);
+    if (memos.length === 0) {
+      return {
+        success: true,
+        data: { dealName: deal.borrowerName, memos: [] },
+        message: `No memos have been generated for ${deal.borrowerName}. Use a template to generate one.`,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        dealName: deal.borrowerName,
+        memos: memos.map(m => ({
+          id: m.id,
+          templateName: m.templateName,
+          status: m.status,
+          version: m.version,
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt,
+        })),
+      },
+      message: `Found ${memos.length} memo(s) for ${deal.borrowerName}: ${memos.map(m => `${m.templateName} (v${m.version}, ${m.status})`).join(', ')}.`,
+    };
+  }
+
+  return { success: false, error: `Unknown action: ${action}. Use "list_templates" or "list_memos".` };
 }

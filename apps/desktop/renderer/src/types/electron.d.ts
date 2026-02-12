@@ -48,6 +48,7 @@ interface ElectronAPI {
   getApiKey: () => Promise<{ hasKey: boolean; maskedKey: string | null }>;
   cancelChat: () => Promise<void>;
   onChatToolExecuted: (callback: (data: { action: string; data: unknown }) => void) => () => void;
+  onChatToolProgress: (callback: (data: { toolName: string; status: 'started' | 'completed'; label: string }) => void) => () => void;
   // RAG API
   indexWorkspace: (workspacePath: string, forceReindex?: boolean) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;
   indexOneDriveWorkspace: (folderId: string, folderPath: string, forceReindex?: boolean) => Promise<{ success: boolean; chunksIndexed: number; error?: string; fromCache?: boolean }>;

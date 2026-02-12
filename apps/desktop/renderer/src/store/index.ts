@@ -20,6 +20,7 @@ interface AppState {
   chatMessages: ChatMessage[];
   isChatLoading: boolean;
   chatError: string | null;
+  toolProgressSteps: Array<{ toolName: string; label: string; status: 'started' | 'completed' }>;
   
   // Chat History
   chatSessions: ChatSession[];
@@ -208,6 +209,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatMessages: [],
   isChatLoading: false,
   chatError: null,
+  toolProgressSteps: [],
   
   // Chat History state
   chatSessions: [],
@@ -874,12 +876,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     });
 
+    // Listen for tool progress events during this stream
+    const removeProgressListener = window.electronAPI.onChatToolProgress((data: { toolName: string; label: string; status: 'started' | 'completed' }) => {
+      set((state) => {
+        if (data.status === 'started') {
+          return { toolProgressSteps: [...state.toolProgressSteps, { toolName: data.toolName, label: data.label, status: 'started' }] };
+        }
+        // Mark matching step as completed
+        const steps = state.toolProgressSteps.map(s =>
+          s.toolName === data.toolName && s.status === 'started' ? { ...s, status: 'completed' as const } : s
+        );
+        return { toolProgressSteps: steps };
+      });
+    });
+
     const removeEndListener = window.electronAPI.onChatStreamEnd(async () => {
-      set({ isChatLoading: false });
+      set({ isChatLoading: false, toolProgressSteps: [] });
       removeStartListener();
       removeChunkListener();
       removeEndListener();
       removeErrorListener();
+      removeProgressListener();
       
       // Save assistant message to database
       const finalMessages = get().chatMessages;
@@ -902,13 +919,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { 
           chatMessages: messages, 
           isChatLoading: false, 
-          chatError: data.error 
+          chatError: data.error,
+          toolProgressSteps: [],
         };
       });
       removeStartListener();
       removeChunkListener();
       removeEndListener();
       removeErrorListener();
+      removeProgressListener();
     });
 
     // Send the message
@@ -1692,14 +1711,26 @@ try {
 
     // Listen for chat tool executions to refresh data
     window.electronAPI.onChatToolExecuted((data) => {
-      console.log('Chat tool executed:', data.action);
+      console.log('Chat tool executed:', data.action, data);
+      const store = useAppStore.getState();
       
-      if (data.action === 'deal_activity_created' || data.action === 'deal_stage_updated') {
-        useAppStore.getState().refreshActivities();
+      if (data.action === 'deal_activity_created' || data.action === 'deal_stage_updated' ||
+          data.action === 'activity_updated' || data.action === 'activity_deleted') {
+        store.refreshActivities();
       }
       
-      if (data.action === 'deal_created' || data.action === 'deal_updated') {
-        useAppStore.getState().loadDeals();
+      if (data.action === 'deal_created' || data.action === 'deal_updated' || data.action === 'deal_deleted') {
+        store.loadDeals();
+      }
+
+      if (data.action === 'export_deal_pdf') {
+        // Trigger PDF export from renderer side
+        const exportData = data.data as { dealId?: string } | undefined;
+        if (exportData?.dealId) {
+          window.electronAPI.exportDealToPdf(exportData.dealId).catch((err: Error) => {
+            console.error('PDF export failed:', err);
+          });
+        }
       }
     });
   } else {
