@@ -286,7 +286,7 @@ Rules:
     ],
     {
       model: 'gpt-4o-mini',
-      max_tokens: 4096,
+      max_tokens: 16384,
       temperature: 0.1,
     }
   );
@@ -295,12 +295,37 @@ Rules:
     throw new Error(`LLM parsing failed: ${response.error || 'No response'}`);
   }
   
-  // Extract JSON from response (handle potential markdown wrapping)
+  // Extract JSON from response — handle markdown wrapping, trailing text, and truncation
   let jsonStr = response.content.trim();
+  
+  // Strip markdown code fences
   const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
     jsonStr = jsonMatch[1].trim();
   }
+  
+  // If the response doesn't start with {, try to find the first {
+  const firstBrace = jsonStr.indexOf('{');
+  if (firstBrace > 0) {
+    jsonStr = jsonStr.slice(firstBrace);
+  }
+  
+  // Strip any text after the closing brace of the root object
+  let depth = 0;
+  let lastBrace = -1;
+  for (let i = 0; i < jsonStr.length; i++) {
+    if (jsonStr[i] === '{') depth++;
+    else if (jsonStr[i] === '}') {
+      depth--;
+      if (depth === 0) { lastBrace = i; break; }
+    }
+  }
+  if (lastBrace > 0) {
+    jsonStr = jsonStr.slice(0, lastBrace + 1);
+  }
+  
+  // Fix common LLM JSON issues: trailing commas before } or ]
+  jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
   
   try {
     const parsed = JSON.parse(jsonStr);

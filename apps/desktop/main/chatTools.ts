@@ -29,6 +29,12 @@ import {
   detectSeasonality,
   searchTransactions,
   getTransactionsByDealAndDateRange,
+  getDailyBalanceByMonth,
+  getDepositCountByMonth,
+  getNegativeDaysByMonth,
+  getNsfCountByMonth,
+  getOverdraftCountByMonth,
+  detectMcaPositions as detectMcaPositionsDb,
 } from './database';
 import { processSchematicToolCall } from './schematic';
 import { createAndOpenEmailDraft, generateEmailBody, type EmailDraft } from './outlook';
@@ -700,6 +706,78 @@ export const CHAT_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+
+  // Underwriting Summary
+  {
+    type: 'function',
+    function: {
+      name: 'get_underwriting_summary',
+      description: 'Get a full underwriting-grade bank statement analysis for a deal. Returns monthly deposits, daily balances, deposit counts, negative days, NSFs, overdrafts, MCA positions, and 3-month aggregates. Use this when the user asks to "analyze bank statements" or wants the full financial picture. You can pass either a deal_id (UUID) or a deal_identifier (borrower name, deal number, or partial match).',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_id: {
+            type: 'string',
+            description: 'The deal UUID. If not known, use deal_identifier instead.',
+          },
+          deal_identifier: {
+            type: 'string',
+            description: 'Borrower name, deal number, or partial name to search for the deal. Used when deal_id is not known.',
+          },
+          num_months: {
+            type: 'number',
+            description: 'Number of most recent months to analyze. Default is 3.',
+          },
+          mca_position_override: {
+            type: 'number',
+            description: 'Manual override for the number of MCA positions, if the user specifies a different count.',
+          },
+        },
+      },
+    },
+  },
+
+  // Bank Statement Overview (for qualification workflow)
+  {
+    type: 'function',
+    function: {
+      name: 'get_bank_statement_overview',
+      description: 'Get an overview of all imported bank statements for a deal — accounts, statement periods, date ranges, and transaction counts. Use this FIRST when a user asks to analyze bank statements, BEFORE running the full underwriting summary. This lets you present what data is available and ask qualifying questions about date range and which accounts to include.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_identifier: {
+            type: 'string',
+            description: 'Borrower name, deal number, or partial match to find the deal.',
+          },
+        },
+        required: ['deal_identifier'],
+      },
+    },
+  },
+
+  // Export Underwriting Report to PDF
+  {
+    type: 'function',
+    function: {
+      name: 'export_underwriting_report',
+      description: 'Export the bank statement underwriting analysis as a professionally formatted PDF report. Use this AFTER running get_underwriting_summary when the user wants to save or export the report. Triggers a Save dialog.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deal_identifier: {
+            type: 'string',
+            description: 'Borrower name, deal number, or partial match to find the deal.',
+          },
+          num_months: {
+            type: 'number',
+            description: 'Number of most recent months to include. Default is 3.',
+          },
+        },
+        required: ['deal_identifier'],
+      },
+    },
+  },
 ];
 
 // ============ Fuzzy Matching ============
@@ -916,6 +994,15 @@ export async function executeTool(
 
       case 'manage_memos':
         return executeManageMemos(args);
+
+      case 'get_underwriting_summary':
+        return executeUnderwritingSummary(args);
+
+      case 'get_bank_statement_overview':
+        return executeBankStatementOverview(args);
+
+      case 'export_underwriting_report':
+        return executeExportUnderwritingReport(args);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
@@ -1669,12 +1756,27 @@ function getDefaultDateRange(): { startDate: string; endDate: string } {
   return { startDate, endDate };
 }
 
-function getSourceInfo(dealId: string): { sourceFiles: string[]; statementCount: number } {
+function getSourceInfo(dealId: string): {
+  sourceFiles: Array<{ fileName: string; filePath: string; periodStart: string; periodEnd: string }>;
+  statementCount: number;
+} {
   const statements = getStatementsByDeal(dealId);
-  return {
-    sourceFiles: [...new Set(statements.map(s => s.fileName))],
-    statementCount: statements.length,
-  };
+  const seen = new Set<string>();
+  const sourceFiles: Array<{ fileName: string; filePath: string; periodStart: string; periodEnd: string }> = [];
+  
+  for (const s of statements) {
+    if (!seen.has(s.fileName)) {
+      seen.add(s.fileName);
+      sourceFiles.push({
+        fileName: s.fileName,
+        filePath: s.filePath,
+        periodStart: s.periodStart,
+        periodEnd: s.periodEnd,
+      });
+    }
+  }
+  
+  return { sourceFiles, statementCount: statements.length };
 }
 
 function executeGetBalanceSummary(args: Record<string, unknown>): ToolResult {
@@ -2245,4 +2347,265 @@ function executeManageMemos(args: Record<string, unknown>): ToolResult {
   }
 
   return { success: false, error: `Unknown action: ${action}. Use "list_templates" or "list_memos".` };
+}
+
+// ============ Underwriting Summary Implementation ============
+
+function executeUnderwritingSummary(args: Record<string, unknown>): ToolResult {
+  const numMonths = (args.num_months as number) || 3;
+  const mcaOverride = args.mca_position_override as number | undefined;
+
+  // Resolve deal: try deal_id first, then fuzzy match on deal_identifier
+  let deal: Deal | null = null;
+  if (args.deal_id) {
+    deal = getDeal(args.deal_id as string);
+  }
+  if (!deal && args.deal_identifier) {
+    const matches = findDealByName(args.deal_identifier as string);
+    if (matches.length > 0) {
+      deal = matches[0].deal;
+    }
+  }
+  // Fallback: try deal_id as a name search too
+  if (!deal && args.deal_id) {
+    const matches = findDealByName(args.deal_id as string);
+    if (matches.length > 0) {
+      deal = matches[0].deal;
+    }
+  }
+  if (!deal) {
+    return { success: false, error: `Could not find a deal matching "${args.deal_identifier || args.deal_id}". Try providing the exact borrower name or deal number.` };
+  }
+  const dealId = deal.id!;
+
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Import bank statements first.`,
+    };
+  }
+
+  // Determine date range from most recent N months of statement data
+  const statements = getStatementsByDeal(dealId);
+  if (statements.length === 0) {
+    return { success: false, error: 'No bank statements found.' };
+  }
+
+  // Sort by period_end descending, take most recent numMonths
+  const sorted = [...statements].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd));
+  const endDate = sorted[0].periodEnd;
+  const relevantStatements = sorted.slice(0, numMonths);
+  const startDate = relevantStatements[relevantStatements.length - 1].periodStart;
+
+  // Gather all metrics
+  const balanceSummary = getMonthlyBalanceSummary(dealId, startDate, endDate);
+  const dailyBalances = getDailyBalanceByMonth(dealId, startDate, endDate);
+  const depositCounts = getDepositCountByMonth(dealId, startDate, endDate);
+  const negativeDays = getNegativeDaysByMonth(dealId, startDate, endDate);
+  const nsfCounts = getNsfCountByMonth(dealId, startDate, endDate);
+  const overdraftCounts = getOverdraftCountByMonth(dealId, startDate, endDate);
+  const mcaPositions = detectMcaPositionsDb(dealId, startDate, endDate);
+
+  // Build per-month data keyed by YYYY-MM
+  const months = [...new Set([
+    ...balanceSummary.map(m => m.month),
+    ...dailyBalances.map(m => m.month),
+    ...depositCounts.map(m => m.month),
+  ])].sort().slice(-numMonths);
+
+  const monthlyData = months.map((month, idx) => {
+    const bal = balanceSummary.find(m => m.month === month);
+    const daily = dailyBalances.find(m => m.month === month);
+    const dep = depositCounts.find(m => m.month === month);
+    const neg = negativeDays.find(m => m.month === month);
+    const nsf = nsfCounts.find(m => m.month === month);
+    const od = overdraftCounts.find(m => m.month === month);
+
+    // Find the statement covering this month for period labels
+    const stmt = relevantStatements.find(s =>
+      s.periodStart.startsWith(month) || s.periodEnd.startsWith(month)
+    );
+
+    return {
+      monthLabel: `Month-${idx + 1}`,
+      month,
+      periodEnd: stmt?.periodEnd || month,
+      deposits: dep?.totalDeposits || bal?.totalDeposits || 0,
+      dailyBalance: daily?.avgDailyBalance || bal?.avgBalance || 0,
+      depositCount: dep?.depositCount || 0,
+      negativeDays: neg?.negativeDays || 0,
+      nsfCount: nsf?.nsfCount || 0,
+      overdraftCount: od?.overdraftCount || 0,
+      minBalance: bal?.minBalance || 0,
+    };
+  });
+
+  // Cross-month aggregates
+  const len = monthlyData.length || 1;
+  const avgDeposits = Math.round(monthlyData.reduce((s, m) => s + m.deposits, 0) / len * 100) / 100;
+  const minDeposits = monthlyData.length > 0 ? Math.min(...monthlyData.map(m => m.deposits)) : 0;
+  const avgDepositCount = Math.round(monthlyData.reduce((s, m) => s + m.depositCount, 0) / len);
+  const minDepositCount = monthlyData.length > 0 ? Math.min(...monthlyData.map(m => m.depositCount)) : 0;
+  const avgNegativeDays = Math.round(monthlyData.reduce((s, m) => s + m.negativeDays, 0) / len * 10) / 10;
+  const maxNegativeDays = monthlyData.length > 0 ? Math.max(...monthlyData.map(m => m.negativeDays)) : 0;
+  const totalNegativeDays = monthlyData.reduce((s, m) => s + m.negativeDays, 0);
+  const avgNsf = Math.round(monthlyData.reduce((s, m) => s + m.nsfCount, 0) / len * 10) / 10;
+  const maxNsf = Math.max(0, ...monthlyData.map(m => m.nsfCount));
+  const totalNsf = monthlyData.reduce((s, m) => s + m.nsfCount, 0);
+  const minDailyBalance = monthlyData.length > 0
+    ? Math.round(Math.min(...monthlyData.map(m => m.minBalance)) * 100) / 100
+    : 0;
+
+  const detectedPositions = mcaOverride ?? mcaPositions.length;
+  const sourceInfo = getSourceInfo(dealId);
+
+  return {
+    success: true,
+    data: {
+      dealName: deal.borrowerName,
+      analysisRange: `${startDate} to ${endDate}`,
+      monthCount: monthlyData.length,
+      monthlyData,
+      aggregates: {
+        avgDepositVolume: avgDeposits,
+        minDepositVolume: minDeposits,
+        avgDepositCount,
+        minDepositCount,
+        avgNegativeDays,
+        maxNegativeDays,
+        totalNegativeDays,
+        avgNsf,
+        maxNsf,
+        totalNsf,
+        minDailyBalance,
+      },
+      mcaPositions: mcaPositions.map(p => ({
+        company: p.company,
+        currentPayment: p.paymentAmount,
+        frequency: p.frequency,
+        isActive: p.isActive,
+      })),
+      numberOfPositions: detectedPositions,
+      mcaPositionOverride: mcaOverride !== undefined,
+      overdraftsByMonth: monthlyData.map(m => ({
+        month: m.monthLabel,
+        count: m.overdraftCount,
+      })),
+      sourceStatements: sourceInfo.sourceFiles.map((s, i) => ({
+        index: i + 1,
+        fileName: s.fileName,
+        filePath: s.filePath,
+        periodStart: s.periodStart,
+        periodEnd: s.periodEnd,
+      })),
+    },
+    message: `Full underwriting analysis for ${deal.borrowerName} covering ${monthlyData.length} months (${startDate} to ${endDate}). ${detectedPositions} MCA position(s) detected. Based on ${sourceInfo.statementCount} bank statement(s).`,
+  };
+}
+
+function executeBankStatementOverview(args: Record<string, unknown>): ToolResult {
+  const identifier = args.deal_identifier as string;
+  if (!identifier) {
+    return { success: false, error: 'A deal identifier (borrower name or deal number) is required.' };
+  }
+
+  // Resolve deal via fuzzy match
+  const matches = findDealByName(identifier);
+  if (matches.length === 0) {
+    return { success: false, error: `No deal found matching "${identifier}".` };
+  }
+  const deal = matches[0].deal;
+  const dealId = deal.id!;
+
+  // Get accounts
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return {
+      success: false,
+      error: `No bank statements have been imported for ${deal.borrowerName}. Please import bank statements first.`,
+    };
+  }
+
+  // Get all statements
+  const allStatements = getStatementsByDeal(dealId);
+  if (allStatements.length === 0) {
+    return { success: false, error: 'No bank statements found.' };
+  }
+
+  // Sort by period
+  const sorted = [...allStatements].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+  const earliestDate = sorted[0].periodStart;
+  const latestDate = sorted[sorted.length - 1].periodEnd;
+
+  // Build account summaries
+  const accountSummaries = accounts.map(acct => {
+    const stmts = allStatements.filter(s => s.accountId === acct.id);
+    const stmtsSorted = [...stmts].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+    return {
+      institution: acct.institution,
+      accountType: acct.accountType,
+      accountNumberLast4: acct.accountNumberLast4 || 'N/A',
+      statementCount: stmts.length,
+      dateRange: stmts.length > 0
+        ? `${stmtsSorted[0].periodStart} to ${stmtsSorted[stmts.length - 1].periodEnd}`
+        : 'No data',
+      statements: stmtsSorted.map(s => ({
+        fileName: s.fileName,
+        period: `${s.periodStart} to ${s.periodEnd}`,
+        totalDeposits: s.totalDeposits,
+        totalWithdrawals: s.totalWithdrawals,
+        transactionCount: s.sourcePageCount || 0,
+      })),
+    };
+  });
+
+  return {
+    success: true,
+    data: {
+      dealId,
+      borrowerName: deal.borrowerName,
+      dealNumber: deal.dealNumber,
+      totalAccounts: accounts.length,
+      totalStatements: allStatements.length,
+      fullDateRange: `${earliestDate} to ${latestDate}`,
+      totalMonths: new Set(allStatements.map(s => s.periodEnd.slice(0, 7))).size,
+      accounts: accountSummaries,
+    },
+    message: `Found ${allStatements.length} bank statement(s) across ${accounts.length} account(s) for ${deal.borrowerName}, covering ${earliestDate} to ${latestDate}.`,
+  };
+}
+
+function executeExportUnderwritingReport(args: Record<string, unknown>): ToolResult {
+  const identifier = args.deal_identifier as string;
+  if (!identifier) {
+    return { success: false, error: 'A deal identifier (borrower name or deal number) is required.' };
+  }
+
+  // Resolve deal
+  const matches = findDealByName(identifier);
+  if (matches.length === 0) {
+    return { success: false, error: `No deal found matching "${identifier}".` };
+  }
+  const deal = matches[0].deal;
+  const dealId = deal.id!;
+  const numMonths = (args.num_months as number) || 3;
+
+  // Verify data exists
+  const accounts = getBankAccountsByDeal(dealId);
+  if (accounts.length === 0) {
+    return { success: false, error: `No bank statements imported for ${deal.borrowerName}.` };
+  }
+
+  return {
+    success: true,
+    data: {
+      dealId,
+      dealNumber: deal.dealNumber,
+      borrowerName: deal.borrowerName,
+      numMonths,
+    },
+    message: `Opening PDF export dialog for ${deal.borrowerName} underwriting report…`,
+    actionTaken: 'export_underwriting_report',
+  };
 }

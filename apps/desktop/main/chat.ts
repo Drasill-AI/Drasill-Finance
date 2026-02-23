@@ -34,6 +34,9 @@ const TOOL_LABELS: Record<string, string> = {
   get_cashflow_by_period: '📊 Analyzing cashflow…',
   detect_seasonality: '📊 Detecting seasonality…',
   query_transactions: '🔍 Searching transactions…',
+  get_underwriting_summary: '📊 Running underwriting analysis…',
+  get_bank_statement_overview: '📊 Reviewing bank statement data…',
+  export_underwriting_report: '📄 Exporting underwriting report…',
 };
 
 let abortController: AbortController | null = null;
@@ -128,6 +131,43 @@ When returning financial analysis results (balance summaries, cashflow data, sea
 - Include a brief narrative summary below the table highlighting key findings
 - When source bank statement files are provided in tool results, cite them using [[1]], [[2]] format
 - Flag notably low or high values in your narrative
+
+UNDERWRITING SUMMARY FORMAT:
+When the get_underwriting_summary tool returns data, format it as a professional underwriting report with these sections:
+
+**Report Header:**
+- Title: "Bank Statement Analysis — [Borrower Name]"
+- Analysis Period: [start] to [end]
+- Source Statements: List each as [[1]] File Name (period), [[2]] File Name (period), etc.
+
+**Sections (use markdown tables with monthly columns):**
+1. Monthly Deposits — dollar amounts per month, Average row, Minimum row
+2. Average Daily Balance — per month, Average row, Minimum row
+3. Monthly # of Deposits — counts per month, Average row
+4. Negative Balance Days — days per month where balance < $0, Total row
+5. NSF/Returned Items — counts per month, Total row
+6. Overdraft Transactions — counts per month, Total row
+7. MCA Positions — table: Company | Current Payment | Frequency | Status
+   - "Number of Positions: N" (note if auto-detected or user-overridden)
+
+**Summary Findings:** Brief narrative highlighting key strengths and red flags.
+
+BANK STATEMENT ANALYSIS WORKFLOW:
+When a user asks to "analyze bank statements" or clicks the Analyze button:
+1. FIRST call get_bank_statement_overview to see what data is available
+2. Present the overview to the user:
+   - List each bank account (institution, account type, last 4 digits)
+   - List each statement period with file names
+   - Show the full available date range
+3. Ask qualifying questions:
+   - "I found [N] bank statements covering [date range]. Would you like me to analyze all [N] months, or a specific date range?"
+   - If multiple accounts: "I see [N] accounts at [banks]. Should I include all accounts or focus on a specific one?"
+   - If MCA patterns were previously detected, mention them
+4. Wait for user confirmation, THEN call get_underwriting_summary with their preferences
+5. Format the result as the professional report described above
+6. After presenting the analysis, offer: "Would you like me to export this as a PDF report?" If the user says yes, call export_underwriting_report.
+
+Do NOT skip the qualification step — always present the overview first so the user can confirm scope.
 
 Be concise, accurate, and helpful. When referencing information from provided context, cite specific sources or file names using [[1]], [[2]] format. Summarize actions you take.`;
 

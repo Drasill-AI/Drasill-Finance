@@ -382,6 +382,13 @@ const api = {
     return ipcRenderer.invoke('export:pipelineToPdf');
   },
 
+  /**
+   * Export underwriting report to PDF
+   */
+  exportUnderwritingReport: (dealId: string, numMonths?: number): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    return ipcRenderer.invoke('export:underwritingReport', dealId, numMonths || 3);
+  },
+
   // ==========================================
   // Usage Tracking API
   // ==========================================
@@ -1117,6 +1124,18 @@ const api = {
 
   bankUpdateStatus: (statementId: string, status: string): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.BANK_UPDATE_STATUS, statementId, status);
+  },
+
+  checkIsBankStatement: (filePath: string): Promise<string | null> => {
+    return ipcRenderer.invoke('bank-check-is-statement', filePath);
+  },
+
+  bankParseAndImport: (dealId: string, filePath: string, fileName: string, extractedText: string): Promise<{ success: boolean; accountId?: string; statementId?: string; transactionCount?: number; error?: string }> => {
+    return ipcRenderer.invoke('bank-parse-and-import', dealId, filePath, fileName, extractedText);
+  },
+
+  bankBatchParseAndImport: (dealId: string, files: Array<{ filePath: string; fileName: string; extractedText: string }>): Promise<{ success: boolean; results: Array<{ fileName: string; success: boolean; error?: string; transactionCount?: number }>; totalImported: number; totalFailed: number }> => {
+    return ipcRenderer.invoke('bank-batch-parse-and-import', dealId, files);
   },
 };
 

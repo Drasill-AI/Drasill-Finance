@@ -14,9 +14,14 @@ interface PdfViewerProps {
   source?: 'local' | 'onedrive';
   oneDriveId?: string;
   initialPage?: number;
+  onAnalyzeBankStatements?: () => void;
+  onImportAndAnalyze?: () => void;
+  isImporting?: boolean;
+  importProgress?: string;
+  pdfCount?: number;
 }
 
-export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: PdfViewerProps) {
+export function PdfViewer({ fileName, path, source, oneDriveId, initialPage, onAnalyzeBankStatements, onImportAndAnalyze, isImporting, importProgress, pdfCount }: PdfViewerProps) {
   const [pdfData, setPdfData] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(initialPage || 1);
@@ -213,6 +218,33 @@ export function PdfViewer({ fileName, path, source, oneDriveId, initialPage }: P
             +
           </button>
         </div>
+
+        {onAnalyzeBankStatements && (
+          <div className={styles.toolbarSection}>
+            <button
+              className={styles.analyzeButton}
+              onClick={onAnalyzeBankStatements}
+              title="Run underwriting analysis on this bank statement"
+            >
+              📊 Analyze
+            </button>
+          </div>
+        )}
+
+        {onImportAndAnalyze && (
+          <div className={styles.toolbarSection}>
+            <button
+              className={`${styles.analyzeButton} ${styles.importAnalyzeButton}`}
+              onClick={onImportAndAnalyze}
+              disabled={isImporting}
+              title="Import all bank statement PDFs in this folder and run underwriting analysis"
+            >
+              {isImporting
+                ? (importProgress || '⏳ Importing…')
+                : `📊 Import & Analyze${pdfCount && pdfCount > 1 ? ` (${pdfCount} PDFs)` : ''}`}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* PDF Content */}

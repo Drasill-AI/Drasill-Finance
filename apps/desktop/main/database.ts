@@ -2386,6 +2386,271 @@ export function detectSeasonality(dealId: string, startDate: string, endDate: st
   };
 }
 
+// =============================================================================
+// UNDERWRITING ANALYTICS
+// =============================================================================
+
+/**
+ * Check if a file path matches any imported bank statement, return deal_id if so
+ */
+export function findDealForBankStatement(filePath: string): string | null {
+  if (!db) throw new Error('Database not initialized');
+  
+  const row = db.prepare(`
+    SELECT ba.deal_id FROM bank_statements bs
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE bs.file_path = ?
+    LIMIT 1
+  `).get(filePath) as any;
+  return row?.deal_id || null;
+}
+
+/**
+ * Get average daily balance per month (averages running_balance by day, then by month)
+ */
+export function getDailyBalanceByMonth(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  avgDailyBalance: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', day) as month,
+      AVG(avg_day_balance) as avg_daily_balance
+    FROM (
+      SELECT
+        t.transaction_date as day,
+        AVG(t.running_balance) as avg_day_balance
+      FROM transactions t
+      JOIN bank_statements bs ON t.statement_id = bs.id
+      JOIN bank_accounts ba ON bs.account_id = ba.id
+      WHERE ba.deal_id = ?
+        AND t.transaction_date >= ?
+        AND t.transaction_date <= ?
+        AND t.running_balance IS NOT NULL
+      GROUP BY t.transaction_date
+    )
+    GROUP BY strftime('%Y-%m', day)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(r => ({
+    month: r.month,
+    avgDailyBalance: Math.round((r.avg_daily_balance || 0) * 100) / 100,
+  }));
+}
+
+/**
+ * Get deposit count per month (only credit > 0 rows)
+ */
+export function getDepositCountByMonth(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  depositCount: number;
+  totalDeposits: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.transaction_date) as month,
+      COUNT(*) as deposit_count,
+      SUM(t.credit) as total_deposits
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+      AND t.credit > 0
+    GROUP BY strftime('%Y-%m', t.transaction_date)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(r => ({
+    month: r.month,
+    depositCount: r.deposit_count || 0,
+    totalDeposits: Math.round((r.total_deposits || 0) * 100) / 100,
+  }));
+}
+
+/**
+ * Get count of negative-balance days per month
+ */
+export function getNegativeDaysByMonth(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  negativeDays: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', day) as month,
+      COUNT(*) as negative_days
+    FROM (
+      SELECT
+        t.transaction_date as day,
+        MIN(t.running_balance) as min_balance
+      FROM transactions t
+      JOIN bank_statements bs ON t.statement_id = bs.id
+      JOIN bank_accounts ba ON bs.account_id = ba.id
+      WHERE ba.deal_id = ?
+        AND t.transaction_date >= ?
+        AND t.transaction_date <= ?
+        AND t.running_balance IS NOT NULL
+      GROUP BY t.transaction_date
+      HAVING min_balance < 0
+    )
+    GROUP BY strftime('%Y-%m', day)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(r => ({
+    month: r.month,
+    negativeDays: r.negative_days || 0,
+  }));
+}
+
+/**
+ * Get NSF (Non-Sufficient Funds) transaction count per month
+ */
+export function getNsfCountByMonth(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  nsfCount: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.transaction_date) as month,
+      COUNT(*) as nsf_count
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+      AND (
+        LOWER(t.description) LIKE '%nsf%'
+        OR LOWER(t.description) LIKE '%non sufficient%'
+        OR LOWER(t.description) LIKE '%non-sufficient%'
+        OR LOWER(t.description) LIKE '%insufficient fund%'
+        OR LOWER(t.description) LIKE '%returned item%'
+        OR LOWER(t.description) LIKE '%return deposit%'
+        OR LOWER(t.description) LIKE '%returned check%'
+        OR LOWER(t.description) LIKE '%unpaid item%'
+      )
+    GROUP BY strftime('%Y-%m', t.transaction_date)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(r => ({
+    month: r.month,
+    nsfCount: r.nsf_count || 0,
+  }));
+}
+
+/**
+ * Get overdraft transaction count per month
+ */
+export function getOverdraftCountByMonth(dealId: string, startDate: string, endDate: string): Array<{
+  month: string;
+  overdraftCount: number;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.transaction_date) as month,
+      COUNT(*) as overdraft_count
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+      AND (
+        LOWER(t.description) LIKE '%overdraft fee%'
+        OR LOWER(t.description) LIKE '%overdraft charge%'
+        OR LOWER(t.description) LIKE '%od fee%'
+        OR LOWER(t.description) LIKE '%od charge%'
+        OR LOWER(t.description) LIKE '%overdraft protection%'
+        OR LOWER(t.description) LIKE '%overdraft transfer%'
+        OR LOWER(t.description) LIKE '%overdraft item%'
+      )
+    GROUP BY strftime('%Y-%m', t.transaction_date)
+    ORDER BY month ASC
+  `).all(dealId, startDate, endDate) as any[];
+  
+  return rows.map(r => ({
+    month: r.month,
+    overdraftCount: r.overdraft_count || 0,
+  }));
+}
+
+/**
+ * Detect MCA positions by finding recurring same-amount daily debits
+ * from the same originator. Pattern-based detection.
+ */
+export function detectMcaPositions(dealId: string, startDate: string, endDate: string): Array<{
+  company: string;
+  paymentAmount: number;
+  frequency: string;
+  avgMonthlyPayments: number;
+  totalPayments: number;
+  firstSeen: string;
+  lastSeen: string;
+  isActive: boolean;
+}> {
+  if (!db) throw new Error('Database not initialized');
+  
+  const rows = db.prepare(`
+    SELECT
+      t.description,
+      ROUND(t.debit, 2) as amount,
+      COUNT(*) as occurrence_count,
+      COUNT(DISTINCT strftime('%Y-%m', t.transaction_date)) as months_seen,
+      MIN(t.transaction_date) as first_seen,
+      MAX(t.transaction_date) as last_seen,
+      ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT strftime('%Y-%m', t.transaction_date)), 1) as avg_per_month
+    FROM transactions t
+    JOIN bank_statements bs ON t.statement_id = bs.id
+    JOIN bank_accounts ba ON bs.account_id = ba.id
+    WHERE ba.deal_id = ?
+      AND t.transaction_date >= ?
+      AND t.transaction_date <= ?
+      AND t.debit > 0
+      AND ROUND(t.debit, 2) > 50
+    GROUP BY ROUND(t.debit, 2), t.description
+    HAVING occurrence_count >= 10
+      AND months_seen >= 2
+      AND avg_per_month >= 8
+    ORDER BY avg_per_month DESC
+  `).all(dealId, startDate, endDate) as any[];
+
+  const endMs = new Date(endDate).getTime();
+  
+  return rows.map(r => {
+    const daysSinceLast = (endMs - new Date(r.last_seen).getTime()) / (1000 * 60 * 60 * 24);
+    let frequency = 'daily';
+    if (r.avg_per_month < 6) frequency = 'weekly';
+    else if (r.avg_per_month < 15) frequency = 'bi-weekly';
+    
+    return {
+      company: r.description,
+      paymentAmount: r.amount,
+      frequency,
+      avgMonthlyPayments: r.avg_per_month,
+      totalPayments: r.occurrence_count,
+      firstSeen: r.first_seen,
+      lastSeen: r.last_seen,
+      isActive: daysSinceLast <= 45,
+    };
+  });
+}
+
+// --- End of underwriting analytics ---
+
 function mapRowToTransaction(row: any): BankTransaction {
   return {
     id: row.id,

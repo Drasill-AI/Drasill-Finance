@@ -259,7 +259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const path = await window.electronAPI.selectWorkspace();
       if (path) {
-        set({ workspacePath: path, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
+        set({ workspacePath: path, workspaceSource: 'local', oneDriveFolderId: null, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
         const children = await get().loadDirectory(path);
         set({
           tree: [{
@@ -1247,7 +1247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   restoreWorkspace: async (workspacePath: string) => {
     try {
-      set({ workspacePath, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
+      set({ workspacePath, workspaceSource: 'local', oneDriveFolderId: null, tree: [], tabs: [], activeTabId: null, fileContents: new Map() });
       const children = await get().loadDirectory(workspacePath);
       set({
         tree: [{
@@ -1729,6 +1729,15 @@ try {
         if (exportData?.dealId) {
           window.electronAPI.exportDealToPdf(exportData.dealId).catch((err: Error) => {
             console.error('PDF export failed:', err);
+          });
+        }
+      }
+
+      if (data.action === 'export_underwriting_report') {
+        const exportData = data.data as { dealId?: string; numMonths?: number } | undefined;
+        if (exportData?.dealId) {
+          window.electronAPI.exportUnderwritingReport(exportData.dealId, exportData.numMonths).catch((err: Error) => {
+            console.error('Underwriting report export failed:', err);
           });
         }
       }

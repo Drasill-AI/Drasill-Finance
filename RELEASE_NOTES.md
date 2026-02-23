@@ -1,388 +1,92 @@
-# Release Notes - v1.1.0: Schematic Visualizer Integration
+# Release Notes - v1.2.0: Bank Statement Analytics & Underwriting Reports
 
-**Release Date:** December 23, 2025  
-**Version:** 1.1.0  
-**Type:** Feature Release
-
----
-
-## 🎉 What's New
-
-### ✨ Schematic Visualizer Tool
-
-A powerful new feature that integrates with OpenAI's function calling to retrieve and display equipment schematics directly in the application.
-
-#### Key Features
-
-- **🔧 Interactive Schematic Viewer**
-  - Zoom controls (50%-200%)
-  - Pan and navigate large diagrams
-  - Download schematics as images
-  - High-quality image rendering
-
-- **📋 Service Instructions Panel**
-  - Display maintenance procedures
-  - Step-by-step repair instructions
-  - Safety warnings and specifications
-  - Contextual information from RAG system
-
-- **🤖 AI-Powered Retrieval**
-  - Natural language requests via chat
-  - OpenAI function calling integration
-  - Automatic component identification
-  - Model-specific schematic matching
-
-- **💾 Smart Tab Management**
-  - Dedicated schematic tabs with 🔧 icon
-  - Automatic deduplication
-  - Tab persistence across sessions
-  - Multiple schematics open simultaneously
-
-- **🧪 Mock Mode**
-  - Test without backend service
-  - Sample data for development
-  - Graceful fallback handling
+**Release Date:** February 23, 2025
+**Version:** 1.2.0
+**Type:** Major Feature Release
 
 ---
 
-## 📦 What's Included
+## What's New
 
-### New Components
+### Bank Statement Parsing & Import
 
-1. **Main Process Handler** (`apps/desktop/main/schematic.ts`)
-   - REST API client for Java service
-   - Image processing and base64 conversion
-   - Health check monitoring
-   - Error handling and fallbacks
+- **PDF & CSV bank statement parsing** powered by GPT-4o-mini LLM extraction
+- **Batch import** all PDF bank statements in a deal folder at once (concurrent processing)
+- **File-tree integration** with contextual Import & Analyze buttons
+- **3-table schema** bank_accounts, bank_statements, transactions with full referential integrity
 
-2. **Schematic Viewer Component** (`SchematicViewer.tsx`)
-   - React-based UI with full TypeScript support
-   - Responsive layout with dark mode
-   - Professional controls and metadata display
+### Underwriting Analytics Dashboard
 
-3. **State Management Integration**
-   - Zustand store actions for schematic operations
-   - Type-safe IPC communication
-   - Seamless integration with existing tab system
+Seven dedicated analytics functions power a professional underwriting summary:
 
-4. **Type Definitions**
-   - `SchematicToolCall` - OpenAI function parameters
-   - `SchematicToolResponse` - Java service response
-   - `SchematicData` - Tab data structure
-   - Complete TypeScript coverage
+- Monthly Deposits (total deposit volume per month)
+- Average Daily Balance (weighted daily balance per month)
+- Deposit Counts (number of deposits per month)
+- Negative Balance Days (days with negative balance)
+- NSF / Returned Items (non-sufficient funds count)
+- Overdraft Transactions (overdraft occurrences)
+- MCA Positions (merchant cash advance detection)
 
-### Documentation
+### Guided Qualification Workflow
 
-- **SCHEMATIC_VISUALIZER_README.md** - Complete technical documentation
-- **SCHEMATIC_SETUP_GUIDE.md** - Quick start and setup instructions
-- **IMPLEMENTATION_TEST_REPORT.md** - Testing and verification details
-- **HOW_TO_RUN.md** - Running and deployment guide
-- **schematic-test.html** - Interactive testing interface
-- **SCHEMATIC_TEST_SCRIPT.js** - Console test utilities
+When you click Analyze on a bank statement, the AI now:
 
----
+1. Reviews available data - shows all accounts, statements, and date ranges
+2. Asks qualifying questions - date range preferences, which accounts to include
+3. Runs full analysis - only after you confirm the scope
+4. Offers PDF export - save the report as a professionally formatted PDF
 
-## 🔄 Architecture
+### Exportable Underwriting PDF Report
 
-```
-User Request (Natural Language)
-         ↓
-OpenAI Chat (Function Calling)
-         ↓
-Electron Renderer (React UI)
-         ↓
-Main Process (IPC Handler)
-         ↓
-Java REST API (localhost:8080)
-         ↓
-Local RAG / Vector Store
-         ↓
-Schematic Images & Service Manuals
-         ↓
-Display in Schematic Viewer Tab
-```
+- Professional layout with Drasill branding and logo
+- Monthly data tables for all 7 metrics with cross-month aggregates
+- MCA positions table (company, payment, frequency, active status)
+- Source statement references
+- Save-as dialog for choosing export location
+
+### 8 New Chat Tools
+
+- create_deal - Create deals conversationally
+- update_deal - Edit any deal fields via chat
+- delete_deal - Remove deals with confirmation
+- update_activity - Modify existing activities
+- delete_activity - Remove activities with confirmation
+- export_deal_pdf - Export deal report to PDF
+- search_deal_files - Browse associated documents
+- manage_memos - Full memo CRUD via chat
+
+### Chat Tool Progress UI
+
+- Real-time stepper showing each tool call with animated status
+- Thinking indicator with animated dots during AI processing
+- Contextual icons and labels for every tool type
 
 ---
 
-## 🚀 Installation & Setup
+## Bug Fixes
 
-### Prerequisites
-
-- Node.js 18+
-- npm or yarn
-- Java 11+ (for backend service)
-- OpenAI API key (for chat integration)
-
-### Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/StephenRoma/Drasill-Cloud.git
-cd Drasill-Cloud
-
-# Install dependencies
-npm install
-
-# Build the application
-npm run build
-
-# Start in development mode
-npm run dev
-```
-
-### Java Service Setup
-
-1. Create or deploy the Java REST API service
-2. Ensure it's running on `http://localhost:8080`
-3. Required endpoints:
-   - `POST /tool-call` - Process schematic requests
-   - `GET /health` - Health check
-
-See `SCHEMATIC_VISUALIZER_README.md` for implementation details.
-
-### OpenAI Configuration
-
-Add the following function to your OpenAI Playground agent:
-
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "retrieve_schematic",
-    "description": "Retrieve equipment schematic diagram and service manual information",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "component_name": {
-          "type": "string",
-          "description": "Name of the component"
-        },
-        "machine_model": {
-          "type": "string",
-          "description": "Machine model number (optional)"
-        }
-      },
-      "required": ["component_name"]
-    }
-  }
-}
-```
+- **Cohere RAG scores** - Fixed negative relevance scores with Math.max() clamping
+- **Local folder indexing** - Opening a local folder no longer re-indexes OneDrive
+- **PDF parsing reliability** - Raised LLM token limit to 16K and added robust JSON extraction
+- **Deal resolution** - Underwriting tools now accept borrower names with fuzzy matching
 
 ---
 
-## 🧪 Testing
+## Installation
 
-### Manual Testing
-
-```javascript
-// Open DevTools (F12) in the running app
-window.useAppStore.getState().openSchematicTab({
-  component_name: "Hydraulic Pump",
-  machine_model: "HX-2000"
-});
-```
-
-### Test Page
-
-Open `schematic-test.html` in the application to access:
-- Interactive test buttons
-- Multiple schematic scenarios
-- Edge case testing
-- State inspection tools
-
-### Mock Mode
-
-The application works without the Java service:
-- Automatic fallback to mock data
-- Sample schematics and instructions
-- Full UI functionality for testing
+Download Drasill Finance Setup 1.2.0.exe from the release assets and run the installer.
 
 ---
 
-## 📊 Technical Details
+## Technical Notes
 
-### Files Modified
-
-- `packages/shared/src/index.ts` - Type definitions
-- `apps/desktop/main/ipc.ts` - IPC handlers
-- `apps/desktop/preload/index.ts` - API exposure
-- `apps/desktop/renderer/src/store/index.ts` - State management
-- `apps/desktop/renderer/src/components/EditorPane.tsx` - Viewer routing
-- `apps/desktop/renderer/src/types/electron.d.ts` - TypeScript types
-
-### Files Added
-
-- `apps/desktop/main/schematic.ts` (192 lines)
-- `apps/desktop/renderer/src/components/SchematicViewer.tsx` (189 lines)
-- `apps/desktop/renderer/src/components/SchematicViewer.module.css` (261 lines)
-- Plus documentation and test files
-
-### Code Statistics
-
-- **Total Lines Added:** ~1,978
-- **TypeScript Errors:** 0
-- **Build Status:** ✅ All builds successful
-- **Test Coverage:** Manual tests provided
+- Electron 29.4.6 / React 18 / TypeScript 5.4
+- SQLite via better-sqlite3 with WAL mode
+- OpenAI GPT-4o-mini via Supabase Edge Function proxy
+- PDF export via hidden BrowserWindow printToPDF pipeline
+- All main/preload TypeScript builds clean (zero errors)
+- Fully backward compatible with v1.1.x data
 
 ---
 
-## 🔧 Configuration
-
-### Environment Variables
-
-```bash
-# Optional: Custom Java service URL
-JAVA_SCHEMATIC_SERVICE_URL=http://localhost:8080
-
-# Optional: Service timeout (ms)
-JAVA_SERVICE_TIMEOUT=30000
-```
-
-### Chat Integration
-
-Wire up the tool call handler in your chat implementation:
-
-```typescript
-if (toolCall.function.name === 'retrieve_schematic') {
-  const args = JSON.parse(toolCall.function.arguments);
-  await useAppStore.getState().openSchematicTab(args);
-}
-```
-
----
-
-## 🐛 Bug Fixes & Improvements
-
-### Improvements in This Release
-
-- Enhanced tab management with schematic support
-- Improved type safety across IPC boundaries
-- Better error handling and user feedback
-- Responsive UI for various screen sizes
-- Professional dark mode styling
-
-### Known Issues
-
-- Electron requires GUI environment (can't run in headless containers)
-- Large schematic images may take time to load on first view
-- Java service must be manually started (auto-start planned for v1.2)
-
----
-
-## 🔮 Future Enhancements
-
-### Planned for v1.2
-
-- [ ] Auto-start Java service with Electron
-- [ ] Schematic annotation tools
-- [ ] Print functionality
-- [ ] Multi-page schematic support
-- [ ] Image caching for faster load times
-
-### Under Consideration
-
-- [ ] Offline schematic storage
-- [ ] Bookmarks and favorites
-- [ ] Export to PDF
-- [ ] Search within service instructions
-- [ ] History of viewed schematics
-
----
-
-## 📚 Documentation
-
-Complete documentation is available in the repository:
-
-- **User Guide:** `SCHEMATIC_SETUP_GUIDE.md`
-- **Technical Docs:** `SCHEMATIC_VISUALIZER_README.md`
-- **Testing:** `IMPLEMENTATION_TEST_REPORT.md`
-- **Running:** `HOW_TO_RUN.md`
-- **Examples:** `apps/desktop/renderer/src/examples/schematic-integration.example.ts`
-
----
-
-## 🙏 Acknowledgments
-
-This feature integrates with:
-- **OpenAI** - Function calling and chat capabilities
-- **Electron** - Cross-platform desktop framework
-- **React** - UI components
-- **Zustand** - State management
-- **Vite** - Build tooling
-
----
-
-## 📝 Upgrade Notes
-
-### From v1.0.x to v1.1.0
-
-1. **Pull the latest changes:**
-   ```bash
-   git pull origin main
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Rebuild the application:**
-   ```bash
-   npm run build
-   ```
-
-4. **Configure Java service** (if using real data)
-
-5. **Update OpenAI configuration** with new function
-
-### Breaking Changes
-
-- None. This is a purely additive release.
-
-### Deprecations
-
-- None.
-
----
-
-## 🔐 Security Notes
-
-- Java service should only be accessible on localhost
-- Image paths are validated before loading
-- No external network requests except to configured Java service
-- All IPC communication is type-checked and validated
-
----
-
-## 💬 Support
-
-For issues, questions, or contributions:
-
-- **GitHub Issues:** https://github.com/StephenRoma/Drasill-Cloud/issues
-- **Documentation:** Check the docs in the repository
-- **Examples:** See `schematic-integration.example.ts`
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-## 🎯 Summary
-
-Version 1.1.0 introduces the **Schematic Visualizer Tool**, a powerful AI-integrated feature for viewing equipment schematics and service instructions. The implementation is production-ready, fully tested, and comes with comprehensive documentation.
-
-**Key Stats:**
-- ✅ 1,978 lines of new code
-- ✅ Zero TypeScript errors
-- ✅ Complete documentation
-- ✅ Interactive testing tools
-- ✅ Mock mode for development
-
-Ready to deploy and integrate with your OpenAI chat system and Java RAG service!
-
----
-
-**Full Changelog:** https://github.com/StephenRoma/Drasill-Cloud/compare/v1.0.0...v1.1.0
+**Full Changelog:** https://github.com/StephenRoma/Drasill-Cloud/compare/v1.1.0...v1.2.0

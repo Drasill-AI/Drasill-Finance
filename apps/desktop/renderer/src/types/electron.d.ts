@@ -74,6 +74,7 @@ interface ElectronAPI {
   // Export API
   exportDealToPdf: (dealId: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   exportPipelineToPdf: () => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  exportUnderwritingReport: (dealId: string, numMonths?: number) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   // Usage Tracking API
   getUsageStats: () => Promise<{
     aiMessagesThisMonth: number;
@@ -193,6 +194,11 @@ interface ElectronAPI {
   bankDeleteAccount: (accountId: string) => Promise<boolean>;
   bankDeleteStatement: (statementId: string) => Promise<boolean>;
   bankUpdateStatus: (statementId: string, status: string) => Promise<boolean>;
+
+  // Bank statement detection
+  checkIsBankStatement: (filePath: string) => Promise<string | null>;
+  bankParseAndImport: (dealId: string, filePath: string, fileName: string, extractedText: string) => Promise<{ success: boolean; accountId?: string; statementId?: string; transactionCount?: number; error?: string }>;
+  bankBatchParseAndImport: (dealId: string, files: Array<{ filePath: string; fileName: string; extractedText: string }>) => Promise<{ success: boolean; results: Array<{ fileName: string; success: boolean; error?: string; transactionCount?: number }>; totalImported: number; totalFailed: number }>;
 }
 
 declare global {

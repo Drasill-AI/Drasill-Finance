@@ -1,10 +1,11 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useAppStore } from '../store';
 import { PdfViewer } from './PdfViewer';
 import { WordViewer } from './WordViewer';
 import { SchematicViewer } from './SchematicViewer';
+import { extractPdfText } from '../utils/pdfExtractor';
 import styles from './EditorPane.module.css';
 import logoImage from '../assets/logo.png';
 
@@ -23,6 +24,8 @@ export function EditorPane({ paneId = 'primary' }: EditorPaneProps) {
     saveTabViewState,
     getTabViewState,
     setActivePaneId,
+    sendMessage,
+    deals,
   } = useAppStore();
 
   // Use appropriate tabs based on paneId
@@ -39,6 +42,107 @@ export function EditorPane({ paneId = 'primary' }: EditorPaneProps) {
     : paneActiveTabId;
   const content = contentKey ? fileContents.get(contentKey) : undefined;
   const isLoading = contentKey ? loadingFiles.has(contentKey) : false;
+
+  // 1) isImported = true → already in DB, show "Analyze"
+  // 2) detectedDeal set but not imported → show "Import & Analyze" (all PDFs in folder)
+  const [bankStatementDealId, setBankStatementDealId] = useState<string | null>(null);
+  const [isImported, setIsImported] = useState(false);
+  const [detectedDealName, setDetectedDealName] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const [siblingPdfs, setSiblingPdfs] = useState<Array<{ path: string; name: string }>>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBankStatementDealId(null);
+    setIsImported(false);
+    setDetectedDealName(null);
+    setSiblingPdfs([]);
+
+    if (activeTab?.type === 'pdf' && activeTab.path) {
+      // First check: is this file already imported?
+      window.electronAPI.checkIsBankStatement(activeTab.path).then(async (dealId) => {
+        if (cancelled) return;
+        if (dealId) {
+          // Already imported — show Analyze button
+          setBankStatementDealId(dealId);
+          setIsImported(true);
+          const deal = deals.find((d) => d.id === dealId);
+          setDetectedDealName(deal?.borrowerName || null);
+        } else {
+          // Not imported — try to detect deal from folder structure
+          try {
+            const detected = await window.electronAPI.detectDealFromPath(activeTab.path!);
+            if (!cancelled && detected) {
+              setBankStatementDealId(detected.id!);
+              setIsImported(false);
+              setDetectedDealName(detected.borrowerName);
+
+              // Find all sibling PDFs in same folder for batch import
+              const folderPath = activeTab.path!.replace(/[\\/][^\\/]+$/, '');
+              const entries = await window.electronAPI.readDir(folderPath);
+              const pdfs = entries
+                .filter((e) => !e.isDirectory && e.name.toLowerCase().endsWith('.pdf'))
+                .map((e) => ({ path: `${folderPath}${folderPath.includes('/') ? '/' : '\\'}${e.name}`, name: e.name }));
+              if (!cancelled) setSiblingPdfs(pdfs);
+            }
+          } catch { /* ignore */ }
+        }
+      }).catch(() => { /* ignore */ });
+    }
+
+    return () => { cancelled = true; };
+  }, [activeTab?.id, activeTab?.type, activeTab?.path, deals]);
+
+  const handleAnalyzeBankStatements = useCallback(() => {
+    if (!bankStatementDealId) return;
+    const name = detectedDealName || 'this deal';
+    sendMessage(`I'd like to analyze the bank statements for ${name}. Please show me what data is available and walk me through the setup.`);
+  }, [bankStatementDealId, detectedDealName, sendMessage]);
+
+  const handleImportAndAnalyze = useCallback(async () => {
+    if (!bankStatementDealId || isImporting) return;
+    const pdfsToImport = siblingPdfs.length > 0 ? siblingPdfs : (activeTab?.path ? [{ path: activeTab.path, name: activeTab.name }] : []);
+    if (pdfsToImport.length === 0) return;
+
+    setIsImporting(true);
+    try {
+      // Extract text from all PDFs
+      setImportProgress(`Extracting text from ${pdfsToImport.length} PDF(s)…`);
+      const filesWithText: Array<{ filePath: string; fileName: string; extractedText: string }> = [];
+
+      for (let i = 0; i < pdfsToImport.length; i++) {
+        setImportProgress(`Extracting text (${i + 1}/${pdfsToImport.length}): ${pdfsToImport[i].name}`);
+        try {
+          const binary = await window.electronAPI.readFileBinary(pdfsToImport[i].path);
+          const text = await extractPdfText(binary.data);
+          filesWithText.push({ filePath: pdfsToImport[i].path, fileName: pdfsToImport[i].name, extractedText: text });
+        } catch (err) {
+          console.warn(`[EditorPane] Skipping ${pdfsToImport[i].name}: ${err}`);
+        }
+      }
+
+      if (filesWithText.length === 0) {
+        throw new Error('Could not extract text from any PDFs');
+      }
+
+      // Batch parse + import
+      setImportProgress(`Parsing & importing ${filesWithText.length} statement(s)…`);
+      const result = await window.electronAPI.bankBatchParseAndImport(bankStatementDealId, filesWithText);
+
+      setImportProgress(`Done: ${result.totalImported} imported, ${result.totalFailed} failed`);
+
+      // Switch to Analyze mode
+      setIsImported(true);
+      const name = detectedDealName || 'this deal';
+      sendMessage(`I just imported ${result.totalImported} bank statement(s) for ${name}. Please show me what data is available and walk me through setting up the analysis.`);
+    } catch (err) {
+      console.error('[EditorPane] Import & Analyze failed:', err);
+      setImportProgress('Import failed — check console for details');
+    } finally {
+      setIsImporting(false);
+    }
+  }, [bankStatementDealId, siblingPdfs, activeTab?.path, activeTab?.name, isImporting, detectedDealName, sendMessage]);
 
   // Save view state when switching tabs
   useEffect(() => {
@@ -124,6 +228,11 @@ export function EditorPane({ paneId = 'primary' }: EditorPaneProps) {
           source={activeTab.source}
           oneDriveId={activeTab.oneDriveId}
           initialPage={activeTab.initialPage}
+          onAnalyzeBankStatements={isImported && bankStatementDealId ? handleAnalyzeBankStatements : undefined}
+          onImportAndAnalyze={!isImported && bankStatementDealId ? handleImportAndAnalyze : undefined}
+          isImporting={isImporting}
+          importProgress={importProgress}
+          pdfCount={siblingPdfs.length}
         />
       </div>
     );

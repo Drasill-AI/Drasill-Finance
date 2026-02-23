@@ -134,10 +134,19 @@ import {
   deleteBankStatement,
   updateBankStatementStatus,
   getTransactionsByStatement,
+  // Analytics functions for underwriting report
+  getDailyBalanceByMonth,
+  getDepositCountByMonth,
+  getNegativeDaysByMonth,
+  getNsfCountByMonth,
+  getOverdraftCountByMonth,
+  detectMcaPositions,
+  getMonthlyBalanceSummary,
 } from './database';
 import {
   exportDealToPDF,
   exportPipelineToPDF,
+  exportUnderwritingReportToPDF,
 } from './pdfExport';
 import {
   initUsageTracking,
@@ -887,6 +896,119 @@ export function setupIpcHandlers(): void {
     
     const deals = getAllDeals();
     return await exportPipelineToPDF(mainWindow, deals);
+  });
+
+  // Export underwriting report to PDF
+  ipcMain.handle('export:underwritingReport', async (_event, dealId: string, numMonths: number = 3): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (!mainWindow) {
+      return { success: false, error: 'No window available' };
+    }
+
+    const deal = getDeal(dealId);
+    if (!deal) {
+      return { success: false, error: 'Deal not found' };
+    }
+
+    const accounts = getBankAccountsByDeal(dealId);
+    if (accounts.length === 0) {
+      return { success: false, error: 'No bank statements imported for this deal.' };
+    }
+
+    const statements = getStatementsByDeal(dealId);
+    if (statements.length === 0) {
+      return { success: false, error: 'No bank statements found.' };
+    }
+
+    const sorted = [...statements].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd));
+    const endDate = sorted[0].periodEnd;
+    const relevantStatements = sorted.slice(0, numMonths);
+    const startDate = relevantStatements[relevantStatements.length - 1].periodStart;
+
+    const balanceSummary = getMonthlyBalanceSummary(dealId, startDate, endDate);
+    const dailyBalances = getDailyBalanceByMonth(dealId, startDate, endDate);
+    const depositCounts = getDepositCountByMonth(dealId, startDate, endDate);
+    const negativeDays = getNegativeDaysByMonth(dealId, startDate, endDate);
+    const nsfCounts = getNsfCountByMonth(dealId, startDate, endDate);
+    const overdraftCounts = getOverdraftCountByMonth(dealId, startDate, endDate);
+    const mcaPositions = detectMcaPositions(dealId, startDate, endDate);
+
+    const months = [...new Set([
+      ...balanceSummary.map(m => m.month),
+      ...dailyBalances.map(m => m.month),
+      ...depositCounts.map(m => m.month),
+    ])].sort().slice(-numMonths);
+
+    const monthlyData = months.map((month, idx) => {
+      const bal = balanceSummary.find(m => m.month === month);
+      const daily = dailyBalances.find(m => m.month === month);
+      const dep = depositCounts.find(m => m.month === month);
+      const neg = negativeDays.find(m => m.month === month);
+      const nsf = nsfCounts.find(m => m.month === month);
+      const od = overdraftCounts.find(m => m.month === month);
+      const stmt = relevantStatements.find(s =>
+        s.periodStart.startsWith(month) || s.periodEnd.startsWith(month)
+      );
+
+      return {
+        monthLabel: `Month-${idx + 1}`,
+        month,
+        periodEnd: stmt?.periodEnd || month,
+        deposits: dep?.totalDeposits || bal?.totalDeposits || 0,
+        dailyBalance: daily?.avgDailyBalance || bal?.avgBalance || 0,
+        depositCount: dep?.depositCount || 0,
+        negativeDays: neg?.negativeDays || 0,
+        nsfCount: nsf?.nsfCount || 0,
+        overdraftCount: od?.overdraftCount || 0,
+        minBalance: bal?.minBalance || 0,
+      };
+    });
+
+    const len = monthlyData.length || 1;
+    const aggregates = {
+      avgDepositVolume: Math.round(monthlyData.reduce((s, m) => s + m.deposits, 0) / len * 100) / 100,
+      minDepositVolume: monthlyData.length > 0 ? Math.min(...monthlyData.map(m => m.deposits)) : 0,
+      avgDepositCount: Math.round(monthlyData.reduce((s, m) => s + m.depositCount, 0) / len),
+      minDepositCount: monthlyData.length > 0 ? Math.min(...monthlyData.map(m => m.depositCount)) : 0,
+      avgNegativeDays: Math.round(monthlyData.reduce((s, m) => s + m.negativeDays, 0) / len * 10) / 10,
+      maxNegativeDays: monthlyData.length > 0 ? Math.max(...monthlyData.map(m => m.negativeDays)) : 0,
+      totalNegativeDays: monthlyData.reduce((s, m) => s + m.negativeDays, 0),
+      avgNsf: Math.round(monthlyData.reduce((s, m) => s + m.nsfCount, 0) / len * 10) / 10,
+      maxNsf: Math.max(0, ...monthlyData.map(m => m.nsfCount)),
+      totalNsf: monthlyData.reduce((s, m) => s + m.nsfCount, 0),
+      minDailyBalance: monthlyData.length > 0 ? Math.round(Math.min(...monthlyData.map(m => m.minBalance)) * 100) / 100 : 0,
+    };
+
+    // Get source file info
+    const seen = new Set<string>();
+    const sourceStatements: Array<{ index: number; fileName: string; periodStart: string; periodEnd: string }> = [];
+    for (const s of statements) {
+      if (!seen.has(s.fileName)) {
+        seen.add(s.fileName);
+        sourceStatements.push({
+          index: sourceStatements.length + 1,
+          fileName: s.fileName,
+          periodStart: s.periodStart,
+          periodEnd: s.periodEnd,
+        });
+      }
+    }
+
+    return await exportUnderwritingReportToPDF(mainWindow, {
+      dealName: deal.borrowerName,
+      dealNumber: deal.dealNumber || '',
+      analysisRange: `${startDate} to ${endDate}`,
+      monthlyData,
+      aggregates,
+      mcaPositions: mcaPositions.map(p => ({
+        company: p.company,
+        currentPayment: p.paymentAmount,
+        frequency: p.frequency,
+        isActive: p.isActive,
+      })),
+      numberOfPositions: mcaPositions.length,
+      sourceStatements,
+    });
   });
 
   // ==========================================
@@ -1947,6 +2069,65 @@ export function setupIpcHandlers(): void {
   // Get bank accounts for a deal
   ipcMain.handle(IPC_CHANNELS.BANK_GET_ACCOUNTS, async (_event, dealId: string) => {
     return getBankAccountsByDeal(dealId);
+  });
+
+  // Check if a file is an imported bank statement (returns deal_id or null)
+  ipcMain.handle('bank-check-is-statement', async (_event, filePath: string) => {
+    const { findDealForBankStatement } = await import('./database');
+    return findDealForBankStatement(filePath);
+  });
+
+  // Combined: parse PDF text + import into database in one round trip
+  ipcMain.handle('bank-parse-and-import', async (_event, dealId: string, filePath: string, fileName: string, extractedText: string) => {
+    try {
+      const { parsePDFBankStatement, importBankStatement } = await import('./bankStatementParser');
+      const parsed = await parsePDFBankStatement(extractedText, fileName);
+      const result = await importBankStatement(dealId, filePath, fileName, parsed);
+      return result;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Parse and import failed' };
+    }
+  });
+
+  // Batch: parse + import multiple PDFs concurrently (up to 3 at a time)
+  ipcMain.handle('bank-batch-parse-and-import', async (
+    _event,
+    dealId: string,
+    files: Array<{ filePath: string; fileName: string; extractedText: string }>
+  ) => {
+    const { parsePDFBankStatement, importBankStatement } = await import('./bankStatementParser');
+    const CONCURRENCY = 3;
+    const results: Array<{ fileName: string; success: boolean; error?: string; transactionCount?: number }> = [];
+
+    // Process in batches of CONCURRENCY
+    for (let i = 0; i < files.length; i += CONCURRENCY) {
+      const batch = files.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (file) => {
+          const parsed = await parsePDFBankStatement(file.extractedText, file.fileName);
+          return importBankStatement(dealId, file.filePath, file.fileName, parsed);
+        })
+      );
+
+      for (let j = 0; j < batchResults.length; j++) {
+        const r = batchResults[j];
+        if (r.status === 'fulfilled' && r.value.success) {
+          results.push({ fileName: batch[j].fileName, success: true, transactionCount: r.value.transactionCount });
+        } else {
+          const error = r.status === 'rejected'
+            ? (r.reason instanceof Error ? r.reason.message : 'Failed')
+            : (r.value.error || 'Failed');
+          results.push({ fileName: batch[j].fileName, success: false, error });
+        }
+      }
+    }
+
+    return {
+      success: results.every(r => r.success),
+      results,
+      totalImported: results.filter(r => r.success).length,
+      totalFailed: results.filter(r => !r.success).length,
+    };
   });
 
   // Get bank statements for a deal
