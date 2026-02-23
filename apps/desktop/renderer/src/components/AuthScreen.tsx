@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Callout, Card, FormGroup, InputGroup, H2 } from '@blueprintjs/core';
 import styles from './AuthScreen.module.css';
 import logo from '../assets/logo.png';
 
@@ -69,128 +70,157 @@ export function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
   // Forgot Password View
   if (showForgotPassword) {
     return (
-      <div className={styles.container}>
-        <div className={styles.card}>
+      <div className={`bp5-dark ${styles.container}`}>
+        <Card className={styles.card} elevation={3}>
           <div className={styles.logo}>
             <img src={logo} alt="Drasill Finance" className={styles.logoImage} />
-            <p>AI-Powered Deal Intelligence</p>
+            <p className="bp5-text-muted">AI-Powered Deal Intelligence</p>
           </div>
 
           {resetSent ? (
             <div className={styles.form}>
-              <h2>Check Your Email</h2>
-              <div className={styles.successMessage}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                  <polyline points="22 4 12 14.01 9 11.01" />
-                </svg>
+              <H2 className={styles.heading}>Check Your Email</H2>
+              <Callout intent="success" icon="tick-circle" className={styles.callout}>
                 <p>We've sent a password reset link to <strong>{email}</strong></p>
-                <p className={styles.subtext}>Check your inbox and follow the instructions to reset your password.</p>
-              </div>
-              <button 
-                type="button" 
-                className={styles.button}
+                <p className="bp5-text-muted">Check your inbox and follow the instructions to reset your password.</p>
+              </Callout>
+              <Button
+                intent="primary"
+                fill
+                large
+                text="Back to Sign In"
                 onClick={handleBackToSignIn}
-              >
-                Back to Sign In
-              </button>
+              />
             </div>
           ) : (
             <form onSubmit={handleForgotPassword} className={styles.form}>
-              <h2>Reset Password</h2>
-              <p className={styles.formSubtext}>Enter your email and we'll send you a link to reset your password.</p>
+              <H2 className={styles.heading}>Reset Password</H2>
+              <p className={`bp5-text-muted ${styles.formSubtext}`}>
+                Enter your email and we'll send you a link to reset your password.
+              </p>
 
-              <div className={styles.field}>
-                <label htmlFor="email">Email</label>
-                <input
-                  id="email"
+              <FormGroup label="Email" labelFor="reset-email">
+                <InputGroup
+                  id="reset-email"
                   type="email"
+                  leftIcon="envelope"
+                  placeholder="you@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
+                  large
+                  fill
                   required
                 />
-              </div>
+              </FormGroup>
 
-              {error && <div className={styles.error}>{error}</div>}
+              {error && (
+                <Callout intent="danger" icon="error" className={styles.callout}>
+                  {error}
+                </Callout>
+              )}
 
-              <button type="submit" className={styles.button} disabled={loading}>
-                {loading ? 'Sending...' : 'Send Reset Link'}
-              </button>
+              <Button
+                type="submit"
+                intent="primary"
+                fill
+                large
+                loading={loading}
+                text={loading ? 'Sending…' : 'Send Reset Link'}
+              />
 
-              <button 
-                type="button" 
-                className={styles.backLink}
+              <Button
+                minimal
+                fill
+                icon="arrow-left"
+                text="Back to Sign In"
                 onClick={handleBackToSignIn}
-              >
-                ← Back to Sign In
-              </button>
+                className={styles.backLink}
+              />
             </form>
           )}
-        </div>
+        </Card>
       </div>
     );
   }
 
   // Sign In View
   return (
-    <div className={styles.container}>
-      <div className={styles.card}>
+    <div className={`bp5-dark ${styles.container}`}>
+      <Card className={styles.card} elevation={3}>
         <div className={styles.logo}>
           <img src={logo} alt="Drasill Finance" className={styles.logoImage} />
-          <p>AI-Powered Deal Intelligence</p>
+          <p className="bp5-text-muted">AI-Powered Deal Intelligence</p>
         </div>
 
         <form onSubmit={handleSubmit} className={styles.form}>
-          <h2>Welcome Back</h2>
+          <H2 className={styles.heading}>Welcome Back</H2>
 
-          <div className={styles.field}>
-            <label htmlFor="email">Email</label>
-            <input
+          <FormGroup label="Email" labelFor="email">
+            <InputGroup
               id="email"
               type="email"
+              leftIcon="envelope"
+              placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
+              large
+              fill
               required
             />
-          </div>
+          </FormGroup>
 
-          <div className={styles.field}>
-            <label htmlFor="password">Password</label>
-            <input
+          <FormGroup label="Password" labelFor="password">
+            <InputGroup
               id="password"
               type="password"
+              leftIcon="lock"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              large
+              fill
               required
-              minLength={6}
             />
-          </div>
+          </FormGroup>
 
-          <button 
-            type="button" 
-            className={styles.forgotPassword}
+          <Button
+            minimal
+            small
+            intent="primary"
+            text="Forgot password?"
             onClick={() => setShowForgotPassword(true)}
-          >
-            Forgot password?
-          </button>
+            className={styles.forgotPassword}
+          />
 
-          {error && <div className={styles.error}>{error}</div>}
+          {error && (
+            <Callout intent="danger" icon="error" className={styles.callout}>
+              {error}
+            </Callout>
+          )}
 
-          <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+          <Button
+            type="submit"
+            intent="primary"
+            fill
+            large
+            loading={loading}
+            text={loading ? 'Signing in…' : 'Sign In'}
+          />
         </form>
 
         <div className={styles.toggle}>
-          <p>
+          <p className="bp5-text-muted">
             Don't have an account?{' '}
-            <button onClick={handleCreateAccount}>Sign up at drasillai.com</button>
+            <Button
+              minimal
+              small
+              intent="primary"
+              text="Sign up at drasillai.com"
+              onClick={handleCreateAccount}
+            />
           </p>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

@@ -20,6 +20,8 @@
     "typecheck": "npx tsc --noEmit -p tsconfig.main.json && npx tsc --noEmit -p tsconfig.preload.json && npx tsc --noEmit -p tsconfig.renderer.json"
   },
   "dependencies": {
+    "@blueprintjs/core": "^6.8.0",
+    "@blueprintjs/icons": "^6.5.2",
     "@drasill/shared": "*",
     "@electron/rebuild": "^4.0.2",
     "@supabase/supabase-js": "^2.91.0",

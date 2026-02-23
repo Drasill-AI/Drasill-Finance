@@ -1,3 +1,4 @@
+/* Layout — gradient background & centering */
 .container {
   width: 100vw;
   height: 100vh;
@@ -5,207 +6,128 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'IBM Plex Mono', 'Consolas', 'Monaco', monospace;
 }
 
+/* Card — let Blueprint handle elevation/shadow, just size & round */
 .card {
-  background: rgba(30, 30, 30, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 48px;
   width: 100%;
-  max-width: 420px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  max-width: 440px;
+  padding: 40px 44px;
+  border-radius: 16px !important;
+  background-color: #252a31 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
+/* Logo block */
 .logo {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .logoImage {
   width: 180px;
   height: auto;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .logo p {
-  color: #9AA0A6;
   font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   margin: 0;
 }
 
-.form h2 {
-  color: #fff;
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 24px 0;
+/* Heading */
+.heading {
   text-align: center;
+  margin-bottom: 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.3px;
 }
 
-.field {
-  margin-bottom: 20px;
+/* Form spacing */
+.form {
+  margin-top: 4px;
 }
 
-.field label {
-  display: block;
-  color: #aaa;
-  font-size: 13px;
+/* Blueprint FormGroup label tweaks */
+.form :global(.bp5-label) {
   font-weight: 500;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.85);
 }
 
-.field input {
-  width: 100%;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 15px;
-  transition: border-color 0.2s, background 0.2s;
-  box-sizing: border-box;
+/* Blueprint InputGroup tweaks for dark bg */
+.form :global(.bp5-input) {
+  background-color: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f5f5f5;
 }
 
-.field input:focus {
-  outline: none;
-  border-color: #4C8DFF;
-  background: rgba(255, 255, 255, 0.08);
+.form :global(.bp5-input:focus) {
+  border-color: #4c8dff;
+  box-shadow: 0 0 0 1px #4c8dff, 0 0 0 3px rgba(76, 141, 255, 0.15);
 }
 
-.field input::placeholder {
-  color: #666;
+.form :global(.bp5-input::placeholder) {
+  color: rgba(255, 255, 255, 0.35);
 }
 
-.error {
-  background: rgba(255, 82, 82, 0.1);
-  border: 1px solid rgba(255, 82, 82, 0.3);
-  border-radius: 8px;
-  color: #ff5252;
-  font-size: 13px;
-  padding: 12px;
-  margin-bottom: 20px;
+/* Blueprint icon inside InputGroup */
+.form :global(.bp5-icon) {
+  color: rgba(255, 255, 255, 0.45) !important;
 }
 
-.button {
-  width: 100%;
-  padding: 14px;
-  background: #4C8DFF;
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 15px;
+/* Primary button accent */
+.form :global(.bp5-button.bp5-intent-primary) {
+  background-color: #4c8dff;
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%);
+  box-shadow: 0 2px 8px rgba(76, 141, 255, 0.30);
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.1s;
+  letter-spacing: 0.3px;
 }
 
-.button:hover:not(:disabled) {
-  background: #3a7be8;
-}
-
-.button:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.button:disabled {
-  background: #555;
-  cursor: not-allowed;
-}
-
-.toggle {
-  margin-top: 24px;
-  text-align: center;
-}
-
-.toggle p {
-  color: #888;
-  font-size: 14px;
-  margin: 0;
-}
-
-.toggle button {
-  background: none;
-  border: none;
-  color: #4C8DFF;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-}
-
-.toggle button:hover {
-  color: #6ba3ff;
-}
-
-.forgotPassword {
-  background: none;
-  border: none;
-  color: #4C8DFF;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-  text-align: right;
-  margin-bottom: 16px;
-  display: block;
-  width: 100%;
-}
-
-.forgotPassword:hover {
-  color: #6ba3ff;
-  text-decoration: underline;
-}
-
-.backLink {
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 12px 0 0 0;
-  text-align: center;
-  width: 100%;
-  margin-top: 8px;
-}
-
-.backLink:hover {
-  color: #4C8DFF;
+.form :global(.bp5-button.bp5-intent-primary:hover) {
+  background-color: #6ba3ff;
+  box-shadow: 0 4px 14px rgba(76, 141, 255, 0.40);
 }
 
 .formSubtext {
-  color: #888;
-  font-size: 14px;
   text-align: center;
-  margin: 0 0 24px 0;
+  margin: 0 0 20px 0;
   line-height: 1.5;
 }
 
-.successMessage {
-  text-align: center;
-  margin-bottom: 24px;
+/* Callout (error / success) spacing */
+.callout {
+  margin-bottom: 16px;
+  border-radius: 8px !important;
 }
 
-.successMessage svg {
-  width: 48px;
-  height: 48px;
-  color: #34d399;
+/* Forgot-password alignment */
+.forgotPassword {
+  display: flex;
+  justify-content: flex-end;
   margin-bottom: 16px;
 }
 
-.successMessage p {
-  color: #fff;
+/* Back link spacing */
+.backLink {
+  margin-top: 12px;
+}
+
+/* Bottom toggle */
+.toggle {
+  margin-top: 24px;
+  text-align: center;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.toggle p {
   font-size: 14px;
-  margin: 0 0 8px 0;
-  line-height: 1.5;
-}
-
-.successMessage strong {
-  color: #4C8DFF;
-}
-
-.subtext {
-  color: #888 !important;
-  font-size: 13px !important;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }

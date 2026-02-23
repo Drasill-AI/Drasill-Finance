@@ -92,14 +92,14 @@ html, body, #root {
   background: var(--bg-selection);
 }
 
-/* Focus outline */
-:focus-visible {
+/* Focus outline — exclude BlueprintJS elements */
+:focus-visible:not([class*="bp5-"]) {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 
-/* Button reset */
-button {
+/* Button reset — exclude BlueprintJS buttons */
+button:not([class*="bp5-"]) {
   font-family: inherit;
   font-size: inherit;
   border: none;
@@ -108,8 +108,8 @@ button {
   color: inherit;
 }
 
-/* Input reset */
-input {
+/* Input reset — exclude BlueprintJS inputs */
+input:not([class*="bp5-"]) {
   font-family: inherit;
   font-size: inherit;
   border: none;
@@ -119,7 +119,7 @@ input {
   border-radius: 4px;
 }
 
-input:focus {
+input:not([class*="bp5-"]):focus {
   outline: 1px solid var(--accent);
 }
 
